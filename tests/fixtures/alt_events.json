@@ -1,0 +1,7 @@
+[
+  {"alert_id": "b1", "observed_ms": 50, "severity": "low", "asset_group": "sandbox", "signature": "ok", "muted": false},
+  {"alert_id": "b2", "observed_ms": 100, "severity": "high", "asset_group": "sandbox", "signature": "slow burst", "muted": false},
+  {"alert_id": "b2", "observed_ms": 120, "severity": "HIGH", "asset_group": "sandbox", "signature": "slow burst duplicate", "muted": false},
+  {"alert_id": "b3", "observed_ms": 200, "severity": "critical", "asset_group": "sandbox", "signature": "muted critical", "muted": true},
+  {"alert_id": "b4", "observed_ms": " 150 ", "severity": "Critical", "asset_group": "sandbox", "signature": "escalate", "muted": false}
+]

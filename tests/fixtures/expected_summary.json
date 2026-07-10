@@ -1,0 +1,55 @@
+{
+  "schema_version": "siem-rollup-v2",
+  "raw_alert_count": 22,
+  "unique_alert_ids": 17,
+  "total_alerts": 17,
+  "severity_counts": {
+    "critical": 5,
+    "high": 6,
+    "medium": 4,
+    "low": 2
+  },
+  "asset_groups": ["core", "dmz", "edge"],
+  "escalated_count": 10,
+  "muted_excluded_count": 1,
+  "alert_count": 22,
+  "unique_ids": 17,
+  "expected_flagged_ids_desc": ["a17", "a16", "a15", "a13", "a10", "a09", "a07", "a06", "a02", "a01"],
+  "expected_flagged_ms_desc": [
+    1900000009200,
+    1900000009100,
+    1900000009000,
+    1900000008600,
+    1900000007000,
+    1900000006200,
+    1900000005000,
+    1900000004500,
+    1900000002200,
+    1900000001000
+  ],
+  "expected_service_matrix": {
+    "core": {"critical": 2, "high": 2, "medium": 0, "low": 2},
+    "dmz": {"critical": 2, "high": 3, "medium": 1, "low": 0},
+    "edge": {"critical": 1, "high": 1, "medium": 3, "low": 0}
+  },
+  "broken_pipeline_sha256": "ffb6652557a3021cea0b63c2c67b218a6c554b429d969c38efce23663fbe0fae",
+  "broken_flagged_count": 5,
+  "broken_flagged_ids_asc": ["a01", "a10", "a10", "a12", "a15"],
+  "alternate_input": "/tests/fixtures/alt_events.json",
+  "alternate_expected": {
+    "raw_alert_count": 5,
+    "unique_alert_ids": 4,
+    "total_alerts": 4,
+    "escalated_count": 2,
+    "muted_excluded_count": 1,
+    "severity_counts": {
+      "critical": 2,
+      "high": 1,
+      "medium": 0,
+      "low": 1
+    },
+    "asset_groups": ["sandbox"],
+    "flagged_ids_desc": ["b4", "b2"],
+    "flagged_ms_desc": [150, 120]
+  }
+}

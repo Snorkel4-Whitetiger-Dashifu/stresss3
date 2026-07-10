@@ -1,0 +1,179 @@
+{
+  "title": "SOC Escalation Rollup — Diagnosis & Report Spec",
+  "version": "3.0",
+  "cli": {
+    "path": "/app/log_audit.py",
+    "subcommands": {
+      "diagnose": {
+        "usage": "python3 /app/log_audit.py diagnose --dossier PATH --report PATH",
+        "defaults": {
+          "dossier": "/app/incident/export_dossier.md",
+          "report": "/app/output/diagnosis.json"
+        },
+        "must_include_all_allowed_ids": true,
+        "must_not_include_repaired_keys": ["verified_summary", "output_paths"],
+        "input_events_path": "/app/data/events.json"
+      },
+      "repair": {
+        "usage": "python3 /app/log_audit.py repair --output-dir PATH",
+        "defaults": {
+          "output_dir": "/app/output"
+        }
+      }
+    }
+  },
+  "diagnosis_report": {
+    "required_keys_diagnosed": ["pipeline_status", "issues_found", "input_stats"],
+    "required_keys_repaired": ["pipeline_status", "issues_found", "input_stats", "verified_summary", "output_paths"],
+    "pipeline_status_diagnosed": "diagnosed",
+    "pipeline_status_repaired": "repaired",
+    "issues_found_item": {
+      "required_fields": ["id", "severity", "description", "resolution", "evidence"],
+      "allowed_ids": [
+        "wrong_observed_field",
+        "severity_filter",
+        "recency_order",
+        "severity_normalization",
+        "dedupe_alert",
+        "muted_filter"
+      ],
+      "evidence": {
+        "required_fields": ["dossier_quote", "pipeline_evidence", "repair_action"],
+        "pipeline_evidence_source": "/app/workflow/.export_report.original",
+        "pipeline_evidence_format": "literal substring excerpt from frozen original workflow source",
+        "dossier_quote_format": "verbatim excerpt from /app/incident/export_dossier.md (whitespace-normalized match)",
+        "term_matching": "case-sensitive substring match for all required_terms_by_issue entries",
+        "required_terms_by_issue": {
+          "wrong_observed_field": {
+            "dossier_quote": ["observed_at", "observed_ms"],
+            "pipeline_evidence": ["event[\"observed_at\"]"],
+            "repair_action": ["observed_ms"]
+          },
+          "severity_filter": {
+            "dossier_quote": ["high", "critical"],
+            "pipeline_evidence": ["severity == \"critical\""],
+            "repair_action": ["high"]
+          },
+          "recency_order": {
+            "dossier_quote": ["ascending", "descending"],
+            "pipeline_evidence": ["sort", "observed_ms"],
+            "repair_action": ["reverse=True"]
+          },
+          "severity_normalization": {
+            "dossier_quote": ["HIGH", "lowercase"],
+            "pipeline_evidence": ["severity"],
+            "repair_action": [".lower("]
+          },
+          "dedupe_alert": {
+            "dossier_quote": ["duplicate", "observed_ms"],
+            "pipeline_evidence": ["for event in events"],
+            "repair_action": ["dedupe"]
+          },
+          "muted_filter": {
+            "dossier_quote": ["muted", "excluded"],
+            "pipeline_evidence": ["escalations.append"],
+            "repair_action": ["muted"]
+          }
+        }
+      }
+    },
+    "input_stats": {
+      "required_fields": ["alert_count", "unique_alert_ids", "asset_groups"],
+      "asset_groups_sort": "ascending alphabetical",
+      "source_events_path": "/app/data/events.json"
+    },
+    "verified_summary": {
+      "required_fields": [
+        "schema_version",
+        "raw_alert_count",
+        "unique_alert_ids",
+        "total_alerts",
+        "severity_counts",
+        "asset_groups",
+        "escalated_count",
+        "muted_excluded_count"
+      ]
+    },
+    "output_paths": {
+      "summary_json": "<output-dir>/summary.json",
+      "flagged_jsonl": "<output-dir>/flagged.jsonl",
+      "service_matrix_json": "<output-dir>/service_matrix.json"
+    }
+  },
+  "canonicalization": {
+    "dedupe_by_alert_id": "collapse duplicate alert_id rows, keeping the row with highest observed_ms; tie-break by higher severity rank (critical > high > medium > low), then prefer muted=false over muted=true, then lexicographically larger normalized signature, then lexicographically larger normalized asset_group",
+    "observed_ms_normalization": "coerce observed_ms to int (trim string whitespace before int conversion; invalid values become 0)",
+    "severity_normalization": "strip surrounding whitespace then lowercase severity strings before counting and escalation",
+    "asset_group_normalization": "strip surrounding whitespace then lowercase asset_group names before grouping",
+    "signature_normalization": "normalize signature by collapsing internal whitespace to single spaces before tie-breaks and output",
+    "muted_normalization": "treat boolean-like strings ('true','1','yes') as true",
+    "total_alerts": "count canonical deduped alerts (muted rows remain in totals)",
+    "flagged_export": "include high and critical only, exclude muted=true, sort by observed_ms descending then severity rank descending then alert_id ascending"
+  },
+  "repair_audit": {
+    "required_keys": ["patched_workflow", "processing_steps", "removed_tokens", "pre_repair", "post_repair"],
+    "processing_steps": [
+      "normalize_observed_ms",
+      "normalize_severity",
+      "dedupe_alert_id",
+      "filter_muted",
+      "build_escalations"
+    ],
+    "patched_workflow": "/app/workflow/export_report.py",
+    "forbidden_executable_tokens": ["event[\"observed_at\"]", "severity == \"critical\""],
+    "removed_tokens_schema": {
+      "description": "Map each forbidden_executable_tokens entry to a boolean (true when absent from patched executable code, excluding comments and docstrings)."
+    },
+    "pre_repair": {
+      "required_fields": ["pipeline_source_sha256", "pipeline_tokens_present"],
+      "capture_order": "before any write to export_report.py",
+      "pipeline_tokens_present_schema": {
+        "description": "Map each forbidden_executable_tokens entry to a boolean (true when present in frozen broken snapshot before repair)."
+      }
+    },
+    "post_repair": {
+      "required_fields": ["escalated_count", "rerun_escalated_count"]
+    }
+  },
+  "workflow_repair": {
+    "path": "/app/workflow/export_report.py",
+    "cli_usage": "python3 /app/workflow/export_report.py --input PATH --output-dir PATH",
+    "defaults": {
+      "input": "/app/data/events.json",
+      "output_dir": "/app/output"
+    },
+    "forbidden_executable_tokens": ["event[\"observed_at\"]", "severity == \"critical\""],
+    "required_executable_tokens": ["int(", ".lower(", ".strip(", "reverse=True", "\"yes\""],
+    "token_check_scope": "executable code only (exclude comments and docstrings)"
+  },
+  "outputs": {
+    "summary_json": {
+      "schema_version": "siem-rollup-v2",
+      "severity_counts_key_order": ["critical", "high", "medium", "low"]
+    },
+    "service_matrix_json": {
+      "description": "Flat map of asset_group -> per-severity counts from canonical deduped alerts.",
+      "shape": {
+        "<asset_group>": {
+          "critical": 0,
+          "high": 0,
+          "medium": 0,
+          "low": 0
+        }
+      },
+      "asset_group_sort": "ascending alphabetical",
+      "severity_key_order": ["critical", "high", "medium", "low"]
+    },
+    "flagged_jsonl": {
+      "required_fields": ["alert_id", "observed_ms", "severity", "asset_group", "signature"],
+      "sort": "observed_ms descending",
+      "severities_included": ["high", "critical"],
+      "exclude_muted": true,
+      "json_format": "compact (no space after colon; use json.dumps separators=(',', ':'))"
+    }
+  },
+  "context": {
+    "dossier_path": "/app/incident/export_dossier.md",
+    "minimum_line_count": 350
+  }
+}
