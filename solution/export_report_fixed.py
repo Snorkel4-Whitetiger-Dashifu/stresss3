@@ -183,6 +183,22 @@ def _override_compaction_checksum(
     ).hexdigest()
 
 
+def _probe_overlap_ms(
+    observed_ms: int,
+    spans: list[tuple[int, int]],
+    lookback_ms: int = 120,
+) -> int:
+    probe_start = observed_ms - lookback_ms
+    probe_end = observed_ms + 1
+    total = 0
+    for start_ms, end_ms in spans:
+        overlap_start = max(probe_start, start_ms)
+        overlap_end = min(probe_end, end_ms)
+        if overlap_end > overlap_start:
+            total += overlap_end - overlap_start
+    return total
+
+
 def export_report(events: list[dict], output_dir: Path, override_rows: list[dict]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     canonical = canonicalize_events(events)
@@ -204,18 +220,43 @@ def export_report(events: list[dict], output_dir: Path, override_rows: list[dict
         if _is_override_suppressed(event, compacted_overrides):
             override_excluded_count += 1
             continue
+        asset_group = _normalize_asset_group(event.get("asset_group", ""))
+        severity = _normalize_severity(event.get("severity", ""))
+        observed_ms = _normalize_observed_ms(event.get("observed_ms", 0))
+        all_overlap_ms = _probe_overlap_ms(
+            observed_ms,
+            compacted_overrides.get((asset_group, "all"), []),
+        )
+        severity_overlap_ms = _probe_overlap_ms(
+            observed_ms,
+            compacted_overrides.get((asset_group, severity), []),
+        )
+        override_pressure_score = (all_overlap_ms // 30) + (severity_overlap_ms // 20)
+        escalation_digest = hashlib.sha1(
+            (
+                f"{event['alert_id']}|{observed_ms}|{severity}|{asset_group}|"
+                f"{_normalize_signature(event['signature'])}|{override_pressure_score}"
+            ).encode("utf-8")
+        ).hexdigest()[:12]
         escalations.append(
             {
                 "alert_id": event["alert_id"],
-                "observed_ms": event["observed_ms"],
-                "severity": _normalize_severity(event["severity"]),
-                "asset_group": _normalize_asset_group(event["asset_group"]),
+                "observed_ms": observed_ms,
+                "severity": severity,
+                "asset_group": asset_group,
                 "signature": _normalize_signature(event["signature"]),
+                "override_pressure_score": override_pressure_score,
+                "escalation_digest": escalation_digest,
             }
         )
-    escalations.sort(key=lambda row: str(row["alert_id"]))
-    escalations.sort(key=lambda row: _severity_rank(row["severity"]), reverse=True)
-    escalations.sort(key=lambda row: row["observed_ms"], reverse=True)
+    escalations.sort(
+        key=lambda row: (
+            -row["observed_ms"],
+            -_severity_rank(row["severity"]),
+            -row["override_pressure_score"],
+            str(row["alert_id"]),
+        )
+    )
 
     summary = {
         "schema_version": SCHEMA_VERSION,
@@ -233,6 +274,13 @@ def export_report(events: list[dict], output_dir: Path, override_rows: list[dict
         ),
         "override_excluded_count": override_excluded_count,
         "override_compaction_checksum": _override_compaction_checksum(compacted_overrides),
+        "max_override_pressure_score": max(
+            (row["override_pressure_score"] for row in escalations),
+            default=0,
+        ),
+        "escalation_digest_checksum": hashlib.sha256(
+            "|".join(row["escalation_digest"] for row in escalations).encode("utf-8")
+        ).hexdigest(),
     }
 
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

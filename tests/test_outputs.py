@@ -232,6 +232,18 @@ def _override_compaction_checksum(
     ).hexdigest()
 
 
+def _probe_overlap_ms(observed_ms: int, spans: list[tuple[int, int]], lookback_ms: int = 120) -> int:
+    probe_start = observed_ms - lookback_ms
+    probe_end = observed_ms + 1
+    total = 0
+    for start, end in spans:
+        overlap_start = max(probe_start, start)
+        overlap_end = min(probe_end, end)
+        if overlap_end > overlap_start:
+            total += overlap_end - overlap_start
+    return total
+
+
 def _compute_summary(events: list[dict], override_rows: list[dict] | None = None) -> dict:
     canonical = _canonicalize_events(events)
     severity_counts = {severity: 0 for severity in SEVERITY_ORDER}
@@ -268,6 +280,13 @@ def _compute_summary(events: list[dict], override_rows: list[dict] | None = None
             and _is_override_suppressed(event, compacted_overrides)
         ),
         "override_compaction_checksum": _override_compaction_checksum(compacted_overrides),
+        "max_override_pressure_score": max(
+            (row["override_pressure_score"] for row in escalations),
+            default=0,
+        ),
+        "escalation_digest_checksum": hashlib.sha256(
+            "|".join(row["escalation_digest"] for row in escalations).encode("utf-8")
+        ).hexdigest(),
     }
 
 
@@ -282,19 +301,38 @@ def _compute_flagged(events: list[dict], override_rows: list[dict] | None = None
             continue
         if _is_override_suppressed(event, compacted_overrides):
             continue
+        asset_group = _normalize_asset_group(event.get("asset_group", ""))
+        severity = _normalize_severity(event.get("severity", ""))
+        observed_ms = _normalize_observed_ms(event.get("observed_ms", 0))
+        all_overlap_ms = _probe_overlap_ms(
+            observed_ms, compacted_overrides.get((asset_group, "all"), [])
+        )
+        severity_overlap_ms = _probe_overlap_ms(
+            observed_ms, compacted_overrides.get((asset_group, severity), [])
+        )
+        override_pressure_score = (all_overlap_ms // 30) + (severity_overlap_ms // 20)
+        escalation_digest = hashlib.sha1(
+            (
+                f"{event['alert_id']}|{observed_ms}|{severity}|{asset_group}|"
+                f"{_normalize_signature(event['signature'])}|{override_pressure_score}"
+            ).encode("utf-8")
+        ).hexdigest()[:12]
         rows.append(
             {
                 "alert_id": event["alert_id"],
-                "observed_ms": event["observed_ms"],
-                "severity": _normalize_severity(event["severity"]),
-                "asset_group": _normalize_asset_group(event["asset_group"]),
+                "observed_ms": observed_ms,
+                "severity": severity,
+                "asset_group": asset_group,
                 "signature": _normalize_signature(event["signature"]),
+                "override_pressure_score": override_pressure_score,
+                "escalation_digest": escalation_digest,
             }
         )
     rows.sort(
         key=lambda row: (
             -row["observed_ms"],
             -_severity_rank(row["severity"]),
+            -row["override_pressure_score"],
             str(row["alert_id"]),
         )
     )
@@ -444,9 +482,12 @@ def test_verified_summary_matches_fixture(diagnosis: dict, expected: dict):
         "muted_excluded_count",
         "override_excluded_count",
         "override_compaction_checksum",
+        "max_override_pressure_score",
+        "escalation_digest_checksum",
     ):
         assert verified[key] == expected[key]
     assert list(verified["severity_counts"].keys()) == list(SEVERITY_ORDER)
+    assert len(verified["escalation_digest_checksum"]) == 64
 
 
 def test_summary_computed_from_events(summary: dict):
@@ -471,6 +512,8 @@ def test_flagged_sorted_descending(flagged_rows: list[dict], expected: dict):
 def test_flagged_severities(flagged_rows: list[dict]):
     for row in flagged_rows:
         assert row["severity"] in ESCALATION_SEVERITIES
+        assert isinstance(row["override_pressure_score"], int)
+        assert len(row["escalation_digest"]) == 12
 
 
 def test_flagged_jsonl_compact_format():

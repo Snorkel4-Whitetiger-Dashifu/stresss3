@@ -1,6 +1,6 @@
 {
   "title": "SOC Escalation Rollup — Audit & Export Spec",
-  "version": "3.3",
+  "version": "3.4",
   "cli": {
     "path": "/app/log_audit.py",
     "subcommands": {
@@ -102,7 +102,9 @@
         "escalated_count",
         "muted_excluded_count",
         "override_excluded_count",
-        "override_compaction_checksum"
+        "override_compaction_checksum",
+        "max_override_pressure_score",
+        "escalation_digest_checksum"
       ]
     },
     "output_paths": {
@@ -124,6 +126,10 @@
     "override_match_rule": "an escalation candidate is suppressed when start_ms <= observed_ms < end_ms for same normalized asset_group and matching severity_scope in {all, candidate.severity}",
     "total_alerts": "count canonical deduped alerts (muted rows remain in totals)",
     "flagged_export": "include high and critical only, exclude muted=true, exclude candidates suppressed by override_match_rule, sort by observed_ms descending then severity rank descending then alert_id ascending"
+    ,
+    "override_pressure_score": "for each included escalation row, compute all_overlap_ms using [observed_ms-120, observed_ms+1) against scope=all windows and severity_overlap_ms against scope=event severity windows; score=(all_overlap_ms//30)+(severity_overlap_ms//20)",
+    "escalation_digest": "sha1('alert_id|observed_ms|severity|asset_group|signature|override_pressure_score') first 12 lowercase hex chars",
+    "flagged_sort_tiebreaks": "observed_ms desc, severity rank desc, override_pressure_score desc, alert_id asc"
   },
   "repair_audit": {
     "required_keys": ["patched_workflow", "processing_steps", "removed_tokens", "pre_repair", "post_repair"],
@@ -199,7 +205,9 @@
       "schema_version": "siem-rollup-v2",
       "severity_counts_key_order": ["critical", "high", "medium", "low"],
       "override_excluded_count": "count of escalation candidates excluded by canonicalized override windows",
-      "override_compaction_checksum": "sha256 over compacted override rows asset_group|severity_scope|start_ms|end_ms"
+      "override_compaction_checksum": "sha256 over compacted override rows asset_group|severity_scope|start_ms|end_ms",
+      "max_override_pressure_score": "maximum override_pressure_score across final escalation rows (0 when none)",
+      "escalation_digest_checksum": "sha256('|'.join(escalation_digest values in final escalation order)) lowercase 64 hex chars"
     },
     "service_matrix_json": {
       "description": "Flat map of asset_group -> per-severity counts from canonical deduped alerts.",
@@ -215,7 +223,7 @@
       "severity_key_order": ["critical", "high", "medium", "low"]
     },
     "flagged_jsonl": {
-      "required_fields": ["alert_id", "observed_ms", "severity", "asset_group", "signature"],
+      "required_fields": ["alert_id", "observed_ms", "severity", "asset_group", "signature", "override_pressure_score", "escalation_digest"],
       "sort": "observed_ms descending",
       "severities_included": ["high", "critical"],
       "exclude_muted": true,

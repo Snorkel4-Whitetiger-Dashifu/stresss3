@@ -34,12 +34,25 @@ Core processing requirements:
   - compact overlapping or touching intervals per `(asset_group, severity_scope)`
   - suppress escalation when `start_ms <= observed_ms < end_ms` for matching asset_group and scope
 - sort escalations by observed_ms descending, severity rank descending, alert_id ascending
+- for each included escalation row, compute `override_pressure_score` using a probe window `[observed_ms-120, observed_ms+1)`:
+  - `all_overlap_ms`: overlap against compacted `severity_scope=all` windows for same asset_group
+  - `severity_overlap_ms`: overlap against compacted windows for same asset_group + event severity
+  - `override_pressure_score = (all_overlap_ms // 30) + (severity_overlap_ms // 20)`
+- include `escalation_digest` per escalation row: first 12 lowercase hex chars of SHA1 over:
+  - `"{alert_id}|{observed_ms}|{severity}|{asset_group}|{signature}|{override_pressure_score}"`
+- final escalation sort order is exact:
+  1) `observed_ms` descending
+  2) severity rank descending (`critical > high > medium > low`)
+  3) `override_pressure_score` descending
+  4) `alert_id` ascending
 - `flagged.jsonl` must be compact JSON lines (`json.dumps(..., separators=(",", ":"))`, no space after `:`)
 
 Summary requirements:
 - include `override_excluded_count` (escalation candidates removed by override windows after muted exclusion)
 - include `override_compaction_checksum` as lowercase SHA256 over compacted override rows in canonical order (`asset_group`, `severity_scope`, `start_ms`, `end_ms`) with line format:
   - `asset_group|severity_scope|start_ms|end_ms`
+- include `max_override_pressure_score` (0 when there are no escalations)
+- include `escalation_digest_checksum` as lowercase SHA256 of `"|".join(escalation_digest values in final escalation order)`
 
 After remediation, write exactly these files in the output dir:
 - `summary.json`

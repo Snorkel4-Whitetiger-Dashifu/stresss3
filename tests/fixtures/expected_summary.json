@@ -17,7 +17,9 @@
   "escalated_count": 7,
   "muted_excluded_count": 1,
   "override_excluded_count": 3,
-  "override_compaction_checksum": "d8760c79dc7e252d2af23b8075be427c00e5a0eef45d9f4aa47626a651f1065b",
+  "override_compaction_checksum": "10611bb599082ee618c5faa76601fbe1edf292243599ffff21c0f14fa1c69b25",
+  "max_override_pressure_score": 5,
+  "escalation_digest_checksum": "6014248a475dea11f4c6144139e384359af701a6a34ca493e08037ffbdf32cf1",
   "alert_count": 22,
   "unique_ids": 17,
   "expected_flagged_ids_desc": [
@@ -75,7 +77,9 @@
     "escalated_count": 1,
     "muted_excluded_count": 1,
     "override_excluded_count": 1,
-    "override_compaction_checksum": "d8760c79dc7e252d2af23b8075be427c00e5a0eef45d9f4aa47626a651f1065b",
+    "override_compaction_checksum": "10611bb599082ee618c5faa76601fbe1edf292243599ffff21c0f14fa1c69b25",
+    "max_override_pressure_score": 0,
+    "escalation_digest_checksum": "47284abb03e6ffe9129876d6e591481ffb47140f189a44ec880ade2eaeab5860",
     "severity_counts": {
       "critical": 2,
       "high": 1,

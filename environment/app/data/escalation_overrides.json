@@ -2,9 +2,10 @@
   {"asset_group": "core", "severity_scope": "high", "start_ms": 1900000009000, "end_ms": 1900000009250},
   {"asset_group": " core ", "severity_scope": "high", "start_ms": 1900000009180, "end_ms": 1900000009300},
   {"asset_group": "dmz", "severity_scope": "all", "start_ms": 1900000006100, "end_ms": 1900000006350},
+  {"asset_group": "dmz", "severity_scope": "high", "start_ms": 1900000009000, "end_ms": 1900000009100},
   {"asset_group": "dmz", "severity_scope": "critical", "start_ms": 1900000008800, "end_ms": 1900000009050},
   {"asset_group": "dmz", "severity_scope": "critical", "start_ms": 1900000009020, "end_ms": 1900000009100},
   {"asset_group": "sandbox", "severity_scope": "high", "start_ms": 110, "end_ms": 130},
   {"asset_group": "edge", "severity_scope": "debug", "start_ms": 0, "end_ms": 1},
-  {"asset_group": "core", "severity_scope": "all", "start_ms": "oops", "end_ms": 20}
+  {"asset_group": "core", "severity_scope": "all", "start_ms": "oops", "end_ms": "oops2"}
 ]
