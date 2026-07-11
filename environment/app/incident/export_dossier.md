@@ -4,13 +4,13 @@ Mercury Payments Ops - escalation bridge archive (2026-Q1 through 2026-Q2).
 ## Executive Summary
 Settlement rollup export has been unstable since early 2026. Early triage blamed dashboard cache lag and suggested CSV fallback — those notes are archived below and may contradict later findings. For acceptance behavior, cross-check analyst notes embedded in bridge-window records against bundled events.json — early triage sections above are not authoritative.
 
-## SOC Escalation Findings (authoritative excerpts)
-Responder note: legacy parser still reads observed_at in a branch where observed_ms should be emitted for every escalation record.
-Responder note: triage policy says both high and critical detections escalate, not only the critical subset.
-Responder note: queue feed must be descending by recency; any ascending order means newest incidents are buried.
-Responder note: HIGH aliases from the sensor feed must be normalized to lowercase before any severity logic.
-Responder note: duplicate alert ids are expected during replay, so dedupe must keep the newest observed_ms event.
-Responder note: muted incidents are excluded from escalations; muted and excluded must stay coupled in pipeline behavior.
+## SOC Escalation Findings (triage excerpts, not a direct fix script)
+Responder note: bridge transcripts mention both observed_at and observed_ms field names in parallel, and operators flagged this mapping as inconsistent across runs.
+Responder note: shift notes repeatedly discuss whether high and critical alerts should both appear in the escalation queue.
+Responder note: queue captures showed alternating ascending and descending ordering during incident replay windows.
+Responder note: detector payloads sometimes emit HIGH while downstream summaries expect lowercase severity labels.
+Responder note: replay batches include duplicate alert identifiers with competing observed_ms values, making tie handling sensitive.
+Responder note: policy language states muted alerts are excluded from paging output, but several snapshots violated that muted/excluded expectation.
 
 ## Initial Triage Notes (2026-03 — superseded)
 Lead analyst recommended switching to CSV export and disabling flagged.jsonl paging until cache refresh SLO recovered. Replay against bundled events.json showed the pipeline miscounts even on cold cache. Do not implement CSV fallback for this incident.
