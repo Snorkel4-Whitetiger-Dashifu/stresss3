@@ -1,6 +1,6 @@
 {
-  "title": "SOC Escalation Rollup — Diagnosis & Report Spec",
-  "version": "3.1",
+  "title": "SOC Escalation Rollup — Audit & Export Spec",
+  "version": "3.2",
   "cli": {
     "path": "/app/log_audit.py",
     "subcommands": {
