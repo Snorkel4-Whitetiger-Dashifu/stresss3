@@ -1,6 +1,6 @@
 {
   "title": "SOC Escalation Rollup — Audit & Export Spec",
-  "version": "3.4",
+  "version": "3.5",
   "cli": {
     "path": "/app/log_audit.py",
     "subcommands": {
@@ -53,34 +53,34 @@
         "term_matching": "case-sensitive substring match for all required_terms_by_issue entries",
         "required_terms_by_issue": {
           "wrong_observed_field": {
-            "dossier_quote": ["observed_at", "observed_ms"],
+            "dossier_quote": ["timestamp", "mismatch"],
             "pipeline_evidence": ["event[\"observed_at\"]"],
-            "repair_action": ["observed_ms"]
+            "repair_action": ["timestamp source"]
           },
           "severity_filter": {
-            "dossier_quote": ["high", "critical"],
+            "dossier_quote": ["queue", "missing"],
             "pipeline_evidence": ["severity == \"critical\""],
-            "repair_action": ["high"]
+            "repair_action": ["severity coverage"]
           },
           "recency_order": {
-            "dossier_quote": ["ascending", "descending"],
+            "dossier_quote": ["ordering", "inconsistent"],
             "pipeline_evidence": ["sort", "observed_ms"],
-            "repair_action": ["reverse=True"]
+            "repair_action": ["recency ordering"]
           },
           "severity_normalization": {
-            "dossier_quote": ["HIGH", "lowercase"],
+            "dossier_quote": ["mixed-case", "diverged"],
             "pipeline_evidence": ["severity"],
-            "repair_action": [".lower("]
+            "repair_action": ["normalize severity"]
           },
           "dedupe_alert": {
-            "dossier_quote": ["duplicate", "observed_ms"],
+            "dossier_quote": ["duplicate", "competing"],
             "pipeline_evidence": ["for event in events"],
-            "repair_action": ["dedupe"]
+            "repair_action": ["deterministic collapse"]
           },
           "muted_filter": {
-            "dossier_quote": ["muted", "excluded"],
+            "dossier_quote": ["muted", "leaked"],
             "pipeline_evidence": ["escalations.append"],
-            "repair_action": ["muted"]
+            "repair_action": ["exclude muted"]
           }
         }
       }
@@ -143,10 +143,6 @@
       "build_escalations"
     ],
     "patched_workflow": "/app/workflow/export_report.py",
-    "workflow_constraints": [
-      "repaired workflow must stop reading observed_at as the escalation timestamp source",
-      "repaired workflow must not filter escalations to critical-only severity"
-    ],
     "forbidden_executable_tokens": [
       "event[\"observed_at\"]",
       "severity == \"critical\""
@@ -193,12 +189,7 @@
       "output_dir": "/app/output",
       "escalation_overrides": "/app/data/escalation_overrides.json"
     },
-    "behavioral_requirements": [
-      "must read observed_ms for escalation timestamp output",
-      "must include both high and critical severities in escalation filtering",
-      "must apply deterministic recency sorting for escalation output",
-      "must apply escalation override suppression windows before final escalation export"
-    ]
+    "acceptance_contract": "The repaired workflow must satisfy canonicalization and outputs without relying on test or solution artifacts."
   },
   "outputs": {
     "summary_json": {

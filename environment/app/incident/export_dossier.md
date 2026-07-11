@@ -1,16 +1,16 @@
-# Settlement Rollup Incident Dossier
-Mercury Payments Ops - escalation bridge archive (2026-Q1 through 2026-Q2).
+# SOC Escalation Incident Dossier
+Mercury Security Operations - escalation bridge archive (2026-Q1 through 2026-Q2).
 
 ## Executive Summary
 Settlement rollup export has been unstable since early 2026. Early triage blamed dashboard cache lag and suggested CSV fallback — those notes are archived below and may contradict later findings. For acceptance behavior, cross-check analyst notes embedded in bridge-window records against bundled events.json — early triage sections above are not authoritative.
 
-## SOC Escalation Findings (triage excerpts, not a direct fix script)
-Responder note: bridge transcripts mention both observed_at and observed_ms field names in parallel, and operators flagged this mapping as inconsistent across runs.
-Responder note: shift notes repeatedly discuss whether high and critical alerts should both appear in the escalation queue.
-Responder note: queue captures showed alternating ascending and descending ordering during incident replay windows.
-Responder note: detector payloads sometimes emit HIGH while downstream summaries expect lowercase severity labels.
-Responder note: replay batches include duplicate alert identifiers with competing observed_ms values, making tie handling sensitive.
-Responder note: policy language states muted alerts are excluded from paging output, but several snapshots violated that muted/excluded expectation.
+## SOC Escalation Findings (triage symptoms, not remediation guidance)
+Responder note: timestamp mismatch reports recur across bridge replays, but the notes disagree about which stage introduced the discrepancy.
+Responder note: the responder queue has missing pages under some severity mixes; operators did not isolate the responsible predicate.
+Responder note: replay ordering is inconsistent between captures even when the underlying alert set is unchanged.
+Responder note: mixed-case detector labels diverged across the summary and paging artifacts.
+Responder note: duplicate identifiers produced competing replay records and unstable aggregate totals.
+Responder note: muted alerts leaked into responder-facing output in several snapshots.
 
 ## Initial Triage Notes (2026-03 — superseded)
 Lead analyst recommended switching to CSV export and disabling flagged.jsonl paging until cache refresh SLO recovered. Replay against bundled events.json showed the pipeline miscounts even on cold cache. Do not implement CSV fallback for this incident.
