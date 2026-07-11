@@ -4,12 +4,12 @@ version = "2.0"
 author_name = "anonymous"
 author_email = "anonymous"
 difficulty = "hard"
-category = "security"
+category = "debugging"
 subcategories = []
 number_of_milestones = 0
 codebase_size = "minimal"
 languages = ["python"]
-tags = ["security", "soc", "siem", "incident-response", "deduplication", "cli"]
+tags = ["debugging", "soc", "siem", "deduplication", "cli"]
 expert_time_estimate_min = 180
 junior_time_estimate_min = 360
 

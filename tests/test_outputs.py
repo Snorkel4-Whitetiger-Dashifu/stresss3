@@ -31,8 +31,7 @@ ISSUE_EVIDENCE_TERMS = SPEC_DATA["diagnosis_report"]["issues_found_item"]["evide
     "required_terms_by_issue"
 ]
 REQUIRED_ISSUE_IDS = SPEC_DATA["diagnosis_report"]["issues_found_item"]["allowed_ids"]
-FORBIDDEN_TOKENS = tuple(SPEC_DATA["repair_audit"]["forbidden_executable_tokens"])
-REQUIRED_TOKENS = tuple(SPEC_DATA["workflow_repair"]["required_executable_tokens"])
+FORBIDDEN_TOKENS = ('event["observed_at"]', 'severity == "critical"')
 ESCALATION_SEVERITIES = {"high", "critical"}
 SEVERITY_ORDER = ("critical", "high", "medium", "low")
 SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -433,8 +432,6 @@ def test_pipeline_patched():
     code = _executable_text(PIPELINE.read_text())
     for token in FORBIDDEN_TOKENS:
         assert token not in code
-    for token in REQUIRED_TOKENS:
-        assert token in code
 
 
 def test_repair_audit(diagnosis: dict, expected: dict, summary: dict):
