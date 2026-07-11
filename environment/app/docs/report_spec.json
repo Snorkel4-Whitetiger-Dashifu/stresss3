@@ -18,7 +18,15 @@
         "usage": "python3 /app/log_audit.py repair --output-dir PATH",
         "defaults": {
           "output_dir": "/app/output"
-        }
+        },
+        "output_dir_contract": "must write all repair outputs under the provided --output-dir path; do not hardcode /app/output when a custom path is supplied",
+        "required_output_files": [
+          "summary.json",
+          "service_matrix.json",
+          "flagged.jsonl",
+          "diagnosis.json",
+          "repair_audit.json"
+        ]
       }
     }
   },
@@ -124,14 +132,37 @@
       "repaired workflow must stop reading observed_at as the escalation timestamp source",
       "repaired workflow must not filter escalations to critical-only severity"
     ],
+    "forbidden_executable_tokens": [
+      "event[\"observed_at\"]",
+      "severity == \"critical\""
+    ],
     "removed_tokens_schema": {
-      "description": "Map each tracked legacy behavior to a boolean that indicates it was removed from executable behavior."
+      "description": "Map each forbidden_executable_tokens literal string to a boolean that indicates it was removed from executable behavior.",
+      "required_key_source": "keys must be the exact literal strings from forbidden_executable_tokens (no semantic aliases)",
+      "required_keys_exact": [
+        "event[\"observed_at\"]",
+        "severity == \"critical\""
+      ],
+      "example_valid": {
+        "event[\"observed_at\"]": true,
+        "severity == \"critical\"": false
+      },
+      "example_invalid": {
+        "reads_observed_at": true,
+        "critical_only_filter": false
+      }
     },
     "pre_repair": {
       "required_fields": ["pipeline_source_sha256", "pipeline_tokens_present"],
       "capture_order": "before any write to export_report.py",
+      "capture_source": "/app/workflow/.export_report.original",
       "pipeline_tokens_present_schema": {
-        "description": "Map each tracked legacy behavior to a boolean that indicates it was present before repair."
+        "description": "Map each forbidden_executable_tokens literal string to a boolean that indicates it was present before repair.",
+        "required_key_source": "keys must be the exact literal strings from forbidden_executable_tokens (no semantic aliases)",
+        "required_keys_exact": [
+          "event[\"observed_at\"]",
+          "severity == \"critical\""
+        ]
       }
     },
     "post_repair": {

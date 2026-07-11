@@ -4,6 +4,11 @@ Context lives in `/app/incident/export_dossier.md` (noisy incident archive). Use
 
 Build `/app/log_audit.py` with `diagnose` and `repair` subcommands as an audit-and-remediation utility. `diagnose` computes input stats from `/app/data/events.json` and must not include remediation-only fields. `repair` updates the workflow, runs it, and writes outputs under `--output-dir` (default `/app/output`).
 
+Non-negotiable repair-audit contract:
+- In `repair_audit.json`, both `removed_tokens` and `pre_repair.pipeline_tokens_present` must use the exact literal token strings as keys: `event["observed_at"]` and `severity == "critical"` (no semantic aliases like `reads_observed_at`).
+- `pre_repair.pipeline_source_sha256` and `pre_repair.pipeline_tokens_present` must be captured before any write to `/app/workflow/export_report.py`, from the frozen original snapshot.
+- `repair` must honor the provided `--output-dir` exactly for all generated outputs (`summary.json`, `service_matrix.json`, `flagged.jsonl`, `diagnosis.json`, `repair_audit.json`) and must not hardcode `/app/output` when a custom path is supplied.
+
 Do not modify `/app/workflow/.export_report.original`. Audit evidence must include literal snippets from the frozen original workflow and verbatim dossier quotes. Include every allowed issue ID from spec in both modes.
 
 After remediation, write exactly:
