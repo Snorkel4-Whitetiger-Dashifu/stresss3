@@ -23,6 +23,7 @@ PIPELINE = Path("/app/workflow/export_report.py")
 ORIGINAL_PIPELINE = Path("/app/workflow/.export_report.original")
 DOSSIER_PATH = Path("/app/incident/export_dossier.md")
 INPUT_PATH = Path("/app/data/events.json")
+OVERRIDES_PATH = Path("/app/data/escalation_overrides.json")
 REPORT_SPEC_PATH = Path("/app/docs/report_spec.json")
 FIXTURES = Path("/tests/fixtures/expected_summary.json")
 SPEC_DATA = json.loads(REPORT_SPEC_PATH.read_text())
@@ -100,6 +101,11 @@ def _normalize_signature(value: object) -> str:
     return " ".join(str(value if value is not None else "").split())
 
 
+def _normalize_override_scope(value: object) -> str:
+    normalized = str(value if value is not None else "").strip().lower()
+    return normalized if normalized in {"all", "high", "critical"} else ""
+
+
 def _normalize_muted(value: object) -> bool:
     if isinstance(value, bool):
         return value
@@ -173,11 +179,68 @@ def _build_service_matrix(events: list[dict]) -> dict[str, dict[str, int]]:
     return {asset_group: matrix[asset_group] for asset_group in sorted(matrix)}
 
 
-def _compute_summary(events: list[dict]) -> dict:
+def _compact_overrides(
+    rows: list[dict],
+) -> dict[tuple[str, str], list[tuple[int, int]]]:
+    by_key: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    for row in rows:
+        asset_group = _normalize_asset_group(row.get("asset_group", ""))
+        scope = _normalize_override_scope(row.get("severity_scope", ""))
+        if not scope:
+            continue
+        start = _normalize_observed_ms(row.get("start_ms", 0))
+        end = _normalize_observed_ms(row.get("end_ms", 0))
+        if end <= start:
+            continue
+        by_key.setdefault((asset_group, scope), []).append((start, end))
+
+    compacted: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    for key, intervals in by_key.items():
+        merged: list[list[int]] = []
+        for start, end in sorted(intervals):
+            if not merged or start > merged[-1][1]:
+                merged.append([start, end])
+            else:
+                merged[-1][1] = max(merged[-1][1], end)
+        compacted[key] = [(start, end) for start, end in merged]
+    return compacted
+
+
+def _is_override_suppressed(
+    event: dict,
+    compacted_overrides: dict[tuple[str, str], list[tuple[int, int]]],
+) -> bool:
+    asset_group = _normalize_asset_group(event.get("asset_group", ""))
+    severity = _normalize_severity(event.get("severity", ""))
+    observed_ms = _normalize_observed_ms(event.get("observed_ms", 0))
+    for scope in ("all", severity):
+        for start, end in compacted_overrides.get((asset_group, scope), []):
+            if start <= observed_ms < end:
+                return True
+    return False
+
+
+def _override_compaction_checksum(
+    compacted_overrides: dict[tuple[str, str], list[tuple[int, int]]]
+) -> str:
+    return hashlib.sha256(
+        "\n".join(
+            f"{asset_group}|{scope}|{start}|{end}"
+            for asset_group, scope in sorted(compacted_overrides)
+            for start, end in compacted_overrides[(asset_group, scope)]
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _compute_summary(events: list[dict], override_rows: list[dict] | None = None) -> dict:
     canonical = _canonicalize_events(events)
     severity_counts = {severity: 0 for severity in SEVERITY_ORDER}
     asset_groups: set[str] = set()
-    escalations = _compute_flagged(events)
+    override_rows = (
+        json.loads(OVERRIDES_PATH.read_text()) if override_rows is None else override_rows
+    )
+    compacted_overrides = _compact_overrides(override_rows)
+    escalations = _compute_flagged(events, override_rows=override_rows)
     for event in canonical:
         severity = _normalize_severity(event.get("severity", ""))
         if severity in severity_counts:
@@ -197,13 +260,27 @@ def _compute_summary(events: list[dict]) -> dict:
             if _normalize_muted(event.get("muted", False))
             and _normalize_severity(event.get("severity", "")) in ESCALATION_SEVERITIES
         ),
+        "override_excluded_count": sum(
+            1
+            for event in canonical
+            if _normalize_severity(event.get("severity", "")) in ESCALATION_SEVERITIES
+            and not _normalize_muted(event.get("muted", False))
+            and _is_override_suppressed(event, compacted_overrides)
+        ),
+        "override_compaction_checksum": _override_compaction_checksum(compacted_overrides),
     }
 
 
-def _compute_flagged(events: list[dict]) -> list[dict]:
+def _compute_flagged(events: list[dict], override_rows: list[dict] | None = None) -> list[dict]:
+    override_rows = (
+        json.loads(OVERRIDES_PATH.read_text()) if override_rows is None else override_rows
+    )
+    compacted_overrides = _compact_overrides(override_rows)
     rows = []
     for event in _canonicalize_events(events):
         if not _is_escalation(event):
+            continue
+        if _is_override_suppressed(event, compacted_overrides):
             continue
         rows.append(
             {
@@ -365,6 +442,8 @@ def test_verified_summary_matches_fixture(diagnosis: dict, expected: dict):
         "asset_groups",
         "escalated_count",
         "muted_excluded_count",
+        "override_excluded_count",
+        "override_compaction_checksum",
     ):
         assert verified[key] == expected[key]
     assert list(verified["severity_counts"].keys()) == list(SEVERITY_ORDER)
@@ -471,6 +550,8 @@ def test_patched_pipeline_supports_alternate_input(expected: dict, tmp_path_fact
     assert summary["raw_alert_count"] == alt["raw_alert_count"]
     assert summary["escalated_count"] == alt["escalated_count"]
     assert summary["muted_excluded_count"] == alt["muted_excluded_count"]
+    assert summary["override_excluded_count"] == alt["override_excluded_count"]
+    assert summary["override_compaction_checksum"] == alt["override_compaction_checksum"]
     assert [row["alert_id"] for row in flagged] == alt["flagged_ids_desc"]
 
 
@@ -718,3 +799,88 @@ def test_pipeline_dedupe_tie_break_prefers_non_muted_then_signature(tmp_path_fac
     assert summary["muted_excluded_count"] == 0
     assert [row["alert_id"] for row in flagged] == ["d1"]
     assert flagged[0]["signature"] == "bbb"
+
+
+def test_override_source_path_affects_output(tmp_path_factory):
+    original_overrides = OVERRIDES_PATH.read_text()
+    try:
+        base_dir = tmp_path_factory.mktemp("base_override")
+        base_result = _run_pipeline(output_dir=base_dir)
+        assert base_result.returncode == 0, base_result.stderr
+        base_summary = json.loads((base_dir / "summary.json").read_text())
+        base_flagged = _flagged_rows(base_dir / "flagged.jsonl")
+
+        OVERRIDES_PATH.write_text("[]\n")
+        no_override_dir = tmp_path_factory.mktemp("no_override")
+        no_override_result = _run_pipeline(output_dir=no_override_dir)
+        assert no_override_result.returncode == 0, no_override_result.stderr
+        no_override_summary = json.loads((no_override_dir / "summary.json").read_text())
+        no_override_flagged = _flagged_rows(no_override_dir / "flagged.jsonl")
+
+        assert base_summary["override_excluded_count"] > 0
+        assert no_override_summary["override_excluded_count"] == 0
+        assert (
+            base_summary["override_compaction_checksum"]
+            != no_override_summary["override_compaction_checksum"]
+        )
+        assert len(no_override_flagged) > len(base_flagged)
+    finally:
+        OVERRIDES_PATH.write_text(original_overrides)
+
+
+def test_override_compaction_and_scope_exercised(tmp_path_factory):
+    original_overrides = OVERRIDES_PATH.read_text()
+    try:
+        override_rows = [
+            {"asset_group": "edge", "severity_scope": "high", "start_ms": 100, "end_ms": 160},
+            {"asset_group": "edge", "severity_scope": "high", "start_ms": 160, "end_ms": 200},
+            {"asset_group": "edge", "severity_scope": "all", "start_ms": 220, "end_ms": 260},
+            {"asset_group": "edge", "severity_scope": "debug", "start_ms": 0, "end_ms": 1},
+        ]
+        OVERRIDES_PATH.write_text(json.dumps(override_rows, indent=2) + "\n")
+        events = [
+            {
+                "alert_id": "o1",
+                "observed_ms": 120,
+                "severity": "high",
+                "asset_group": "edge",
+                "signature": "silenced high",
+                "muted": False,
+            },
+            {
+                "alert_id": "o2",
+                "observed_ms": 120,
+                "severity": "critical",
+                "asset_group": "edge",
+                "signature": "kept critical",
+                "muted": False,
+            },
+            {
+                "alert_id": "o3",
+                "observed_ms": 230,
+                "severity": "critical",
+                "asset_group": "edge",
+                "signature": "silenced all",
+                "muted": False,
+            },
+            {
+                "alert_id": "o4",
+                "observed_ms": 280,
+                "severity": "high",
+                "asset_group": "edge",
+                "signature": "kept high",
+                "muted": False,
+            },
+        ]
+        input_path = tmp_path_factory.mktemp("override_scope") / "events.json"
+        input_path.write_text(json.dumps(events))
+        out_dir = tmp_path_factory.mktemp("override_scope_out")
+        result = _run_pipeline(input_path=input_path, output_dir=out_dir)
+        assert result.returncode == 0, result.stderr
+
+        summary = json.loads((out_dir / "summary.json").read_text())
+        flagged = _flagged_rows(out_dir / "flagged.jsonl")
+        assert summary["override_excluded_count"] == 2
+        assert [row["alert_id"] for row in flagged] == ["o4", "o2"]
+    finally:
+        OVERRIDES_PATH.write_text(original_overrides)

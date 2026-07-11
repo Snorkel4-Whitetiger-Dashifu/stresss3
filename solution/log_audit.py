@@ -77,7 +77,7 @@ def pipeline_source_sha256(source: str) -> str:
 
 
 def pre_repair_audit() -> dict:
-    source = PIPELINE_PATH.read_text()
+    source = ORIGINAL_PIPELINE.read_text()
     return {
         "pipeline_source_sha256": pipeline_source_sha256(source),
         "pipeline_tokens_present": {token: token in source for token in FORBIDDEN_TOKENS},
