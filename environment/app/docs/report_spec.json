@@ -1,6 +1,6 @@
 {
   "title": "SOC Escalation Rollup — Audit & Export Spec",
-  "version": "3.5",
+  "version": "3.6",
   "cli": {
     "path": "/app/log_audit.py",
     "subcommands": {
@@ -122,7 +122,8 @@
     "signature_normalization": "normalize signature by collapsing internal whitespace to single spaces before tie-breaks and output",
     "muted_normalization": "treat boolean-like strings ('true','1','yes') as true",
     "override_scope_normalization": "override severity_scope uses str(...).strip().lower(); supported values are all, high, critical",
-    "override_window_canonicalization": "override windows come from /app/data/escalation_overrides.json; normalize asset_group and severity_scope, coerce start_ms/end_ms with observed_ms rules, drop end_ms<=start_ms, compact overlap/touch per (asset_group, severity_scope)",
+    "override_window_canonicalization": "override windows come from /app/data/escalation_overrides.json; normalize asset_group and severity_scope, coerce start_ms/end_ms with observed_ms rules, drop end_ms<=start_ms, then sort and compact per (asset_group,severity_scope)",
+    "override_compaction_merge_rule": "merge when next.start_ms <= current.end_ms, so touching intervals merge. An equivalent implementation starts a new segment only when next.start_ms > current.end_ms; that '>' branch does not mean touching intervals remain separate.",
     "override_match_rule": "an escalation candidate is suppressed when start_ms <= observed_ms < end_ms for same normalized asset_group and matching severity_scope in {all, candidate.severity}",
     "total_alerts": "count canonical deduped alerts (muted rows remain in totals)",
     "flagged_export": "include high and critical only, exclude muted=true, exclude candidates suppressed by override_match_rule, sort by observed_ms descending then severity rank descending then alert_id ascending"
@@ -189,14 +190,36 @@
       "output_dir": "/app/output",
       "escalation_overrides": "/app/data/escalation_overrides.json"
     },
-    "acceptance_contract": "The repaired workflow must satisfy canonicalization and outputs without relying on test or solution artifacts."
+    "acceptance_contract": "The repaired workflow must satisfy canonicalization and outputs without relying on test or solution artifacts.",
+    "repair_state_contract": {
+      "self_contained": "every log_audit.py repair invocation must write a correct repaired implementation to /app/workflow/export_report.py before running it",
+      "starting_state": "verification may copy /app/workflow/.export_report.original over the active workflow immediately before repair, including with a custom --output-dir; never assume solve.sh or an earlier command already patched it",
+      "sequence": [
+        "capture pre-repair hash and token evidence from the frozen original",
+        "install the corrected active workflow",
+        "run it with the requested output directory",
+        "run it again to verify idempotency"
+      ],
+      "frozen_original": "never write to /app/workflow/.export_report.original"
+    }
   },
   "outputs": {
     "summary_json": {
       "schema_version": "siem-rollup-v2",
       "severity_counts_key_order": ["critical", "high", "medium", "low"],
       "override_excluded_count": "count of escalation candidates excluded by canonicalized override windows",
-      "override_compaction_checksum": "sha256 over compacted override rows asset_group|severity_scope|start_ms|end_ms",
+      "override_compaction_checksum": "SHA-256 of the exact payload defined by override_checksum_serialization",
+      "override_checksum_serialization": {
+        "row_format": "asset_group|severity_scope|start_ms|end_ms",
+        "row_order": "sort by (asset_group,severity_scope) ascending, then compacted interval (start_ms,end_ms) ascending",
+        "row_delimiter": "one LF character (\\n)",
+        "trailing_delimiter": "none; do not append LF or | after the final row",
+        "encoding": "UTF-8",
+        "empty_input": "hash the empty byte string",
+        "digest": "lowercase hashlib.sha256(payload.encode('utf-8')).hexdigest()",
+        "test_vector_payload": "edge|critical|300|360\nedge|high|100|220",
+        "test_vector_sha256": "03185b505ae526bc703c4e14bd088572497a9f801a18fba4fc50d2fdab082522"
+      },
       "max_override_pressure_score": "maximum override_pressure_score across final escalation rows (0 when none)",
       "escalation_digest_checksum": "sha256('|'.join(escalation_digest values in final escalation order)) lowercase 64 hex chars"
     },

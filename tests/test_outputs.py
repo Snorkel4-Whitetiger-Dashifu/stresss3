@@ -400,6 +400,30 @@ def flagged_rows() -> list[dict]:
     return _flagged_rows()
 
 
+def test_override_checksum_contract_and_touching_merge():
+    contract = SPEC_DATA["outputs"]["summary_json"]["override_checksum_serialization"]
+    assert hashlib.sha256(
+        contract["test_vector_payload"].encode("utf-8")
+    ).hexdigest() == contract["test_vector_sha256"]
+    compacted = _compact_overrides(
+        [
+            {
+                "asset_group": "edge",
+                "severity_scope": "high",
+                "start_ms": 100,
+                "end_ms": 160,
+            },
+            {
+                "asset_group": "edge",
+                "severity_scope": "high",
+                "start_ms": 160,
+                "end_ms": 220,
+            },
+        ]
+    )
+    assert compacted[("edge", "high")] == [(100, 220)]
+
+
 def test_cli_exists():
     assert CLI.exists(), f"CLI not found at {CLI}"
 
@@ -636,7 +660,9 @@ def test_cli_diagnose_subcommand(expected: dict, dossier_text: str):
         assert quote in dossier_text
 
 
-def test_repair_supports_custom_output_dir(tmp_path_factory, expected: dict):
+def test_repair_repatches_reset_workflow_with_custom_output_dir(
+    tmp_path_factory, expected: dict
+):
     custom_dir = tmp_path_factory.mktemp("custom_output")
     current = PIPELINE.read_text()
     try:
@@ -648,6 +674,9 @@ def test_repair_supports_custom_output_dir(tmp_path_factory, expected: dict):
             timeout=60,
         )
         assert result.returncode == 0, result.stderr
+        repaired_source = PIPELINE.read_text()
+        assert ".lower(" in repaired_source
+        assert 'event["observed_at"]' not in repaired_source
         summary = json.loads((custom_dir / "summary.json").read_text())
         flagged = _flagged_rows(custom_dir / "flagged.jsonl")
         diagnosis = json.loads((custom_dir / "diagnosis.json").read_text())

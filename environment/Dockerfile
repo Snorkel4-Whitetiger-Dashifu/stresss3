@@ -8,6 +8,10 @@ RUN apt-get update \
         asciinema \
     && rm -rf /var/lib/apt/lists/*
 
+COPY requirements.lock /tmp/requirements.lock
+RUN python3 -m pip install --no-cache-dir --no-deps \
+        -r /tmp/requirements.lock
+
 WORKDIR /app
 
 COPY app/ /app/
