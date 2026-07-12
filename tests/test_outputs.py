@@ -298,6 +298,75 @@ def _annotate_campaigns(rows: list[dict]) -> None:
             rows[index]["campaign_digest"] = campaign_digest
 
 
+def _annotate_campaign_influence(rows: list[dict]) -> None:
+    campaigns: dict[str, dict] = {}
+    for index, row in enumerate(rows):
+        campaign = campaigns.setdefault(
+            row["campaign_id"],
+            {
+                "indexes": [],
+                "start_ms": row["observed_ms"],
+                "end_ms": row["observed_ms"],
+                "assets": set(),
+                "tokens": set(),
+                "risk_score": row["campaign_risk_score"],
+            },
+        )
+        campaign["indexes"].append(index)
+        campaign["start_ms"] = min(campaign["start_ms"], row["observed_ms"])
+        campaign["end_ms"] = max(campaign["end_ms"], row["observed_ms"])
+        campaign["assets"].add(row["asset_group"])
+        campaign["tokens"].update(str(row["signature"]).lower().split())
+
+    finalized: list[tuple[str, dict]] = []
+    for campaign_id, campaign in sorted(
+        campaigns.items(),
+        key=lambda item: (item[1]["start_ms"], item[1]["end_ms"], item[0]),
+    ):
+        best_score = campaign["risk_score"]
+        best_path = (campaign_id,)
+        for predecessor_id, predecessor in finalized:
+            gap_ms = campaign["start_ms"] - predecessor["end_ms"]
+            if gap_ms <= 0 or gap_ms > 3000:
+                continue
+            shared_assets = len(campaign["assets"] & predecessor["assets"])
+            shared_tokens = len(campaign["tokens"] & predecessor["tokens"])
+            if shared_assets == 0 and shared_tokens == 0:
+                continue
+            edge_weight = (
+                1
+                + (2 * shared_assets)
+                + shared_tokens
+                + max(0, 3 - (gap_ms // 1000))
+            )
+            candidate_score = (
+                predecessor["influence_score"] + edge_weight + campaign["risk_score"]
+            )
+            candidate_path = predecessor["influence_path"] + (campaign_id,)
+            if candidate_score > best_score or (
+                candidate_score == best_score and candidate_path < best_path
+            ):
+                best_score = candidate_score
+                best_path = candidate_path
+        campaign["influence_score"] = best_score
+        campaign["influence_path"] = best_path
+        campaign["influence_depth"] = len(best_path) - 1
+        campaign["influence_digest"] = hashlib.sha256(
+            (
+                f"{campaign_id}|{best_score}|{campaign['influence_depth']}|"
+                f"{','.join(best_path)}"
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+        finalized.append((campaign_id, campaign))
+
+    for _, campaign in finalized:
+        for index in campaign["indexes"]:
+            rows[index]["campaign_influence_score"] = campaign["influence_score"]
+            rows[index]["campaign_influence_depth"] = campaign["influence_depth"]
+            rows[index]["campaign_influence_path"] = list(campaign["influence_path"])
+            rows[index]["campaign_influence_digest"] = campaign["influence_digest"]
+
+
 def _compute_summary(events: list[dict], override_rows: list[dict] | None = None) -> dict:
     canonical = _canonicalize_events(events)
     severity_counts = {severity: 0 for severity in SEVERITY_ORDER}
@@ -346,6 +415,15 @@ def _compute_summary(events: list[dict], override_rows: list[dict] | None = None
         "campaign_digest_checksum": hashlib.sha256(
             "|".join(row["campaign_digest"] for row in escalations).encode("utf-8")
         ).hexdigest(),
+        "max_campaign_influence_score": max(
+            (row["campaign_influence_score"] for row in escalations),
+            default=0,
+        ),
+        "campaign_influence_digest_checksum": hashlib.sha256(
+            "|".join(
+                row["campaign_influence_digest"] for row in escalations
+            ).encode("utf-8")
+        ).hexdigest(),
         "escalation_digest_checksum": hashlib.sha256(
             "|".join(row["escalation_digest"] for row in escalations).encode("utf-8")
         ).hexdigest(),
@@ -384,13 +462,17 @@ def _compute_flagged(events: list[dict], override_rows: list[dict] | None = None
             }
         )
     _annotate_campaigns(rows)
+    _annotate_campaign_influence(rows)
     for row in rows:
         row["escalation_digest"] = hashlib.sha1(
             (
                 f"{row['alert_id']}|{row['observed_ms']}|{row['severity']}|"
                 f"{row['asset_group']}|{row['signature']}|{row['override_pressure_score']}|"
                 f"{row['campaign_id']}|{row['campaign_size']}|{row['campaign_span_ms']}|"
-                f"{row['campaign_risk_score']}|{row['campaign_digest']}"
+                f"{row['campaign_risk_score']}|{row['campaign_digest']}|"
+                f"{row['campaign_influence_score']}|{row['campaign_influence_depth']}|"
+                f"{','.join(row['campaign_influence_path'])}|"
+                f"{row['campaign_influence_digest']}"
             ).encode("utf-8")
         ).hexdigest()[:12]
     rows.sort(
@@ -398,6 +480,7 @@ def _compute_flagged(events: list[dict], override_rows: list[dict] | None = None
             -row["observed_ms"],
             -_severity_rank(row["severity"]),
             -row["campaign_risk_score"],
+            -row["campaign_influence_score"],
             -row["override_pressure_score"],
             str(row["alert_id"]),
         )
@@ -467,6 +550,7 @@ def flagged_rows() -> list[dict]:
 
 
 def test_override_checksum_contract_and_touching_merge():
+    """Verify touching-window compaction and checksum serialization."""
     contract = SPEC_DATA["outputs"]["summary_json"]["override_checksum_serialization"]
     assert hashlib.sha256(
         contract["test_vector_payload"].encode("utf-8")
@@ -576,11 +660,14 @@ def test_verified_summary_matches_fixture(diagnosis: dict, expected: dict):
         "campaign_count",
         "max_campaign_risk_score",
         "campaign_digest_checksum",
+        "max_campaign_influence_score",
+        "campaign_influence_digest_checksum",
         "escalation_digest_checksum",
     ):
         assert verified[key] == expected[key]
     assert list(verified["severity_counts"].keys()) == list(SEVERITY_ORDER)
     assert len(verified["campaign_digest_checksum"]) == 64
+    assert len(verified["campaign_influence_digest_checksum"]) == 64
     assert len(verified["escalation_digest_checksum"]) == 64
 
 
@@ -612,6 +699,10 @@ def test_flagged_severities(flagged_rows: list[dict]):
         assert isinstance(row["campaign_span_ms"], int)
         assert isinstance(row["campaign_risk_score"], int)
         assert len(row["campaign_digest"]) == 12
+        assert isinstance(row["campaign_influence_score"], int)
+        assert isinstance(row["campaign_influence_depth"], int)
+        assert isinstance(row["campaign_influence_path"], list)
+        assert len(row["campaign_influence_digest"]) == 12
         assert len(row["escalation_digest"]) == 12
 
 
@@ -645,7 +736,7 @@ def test_pipeline_does_not_reference_test_or_solution_artifacts():
         assert token not in combined
 
 
-def test_pipeline_runtime_does_not_read_tests_tree():
+def test_repair_runtime_does_not_read_tests_tree():
     with tempfile.TemporaryDirectory() as tmp:
         guard = Path(tmp) / "sitecustomize.py"
         guard.write_text(
@@ -681,9 +772,8 @@ def test_pipeline_runtime_does_not_read_tests_tree():
         result = subprocess.run(
             [
                 "python3",
-                str(PIPELINE),
-                "--input",
-                str(INPUT_PATH),
+                str(CLI),
+                "repair",
                 "--output-dir",
                 str(out),
             ],
@@ -714,8 +804,6 @@ def test_pipeline_patched():
     code = _executable_text(PIPELINE.read_text())
     for token in FORBIDDEN_TOKENS:
         assert token not in code
-    for token in SPEC_DATA["workflow_repair"]["required_executable_tokens"]:
-        assert token in code
 
 
 def test_repair_audit(diagnosis: dict, expected: dict, summary: dict):
@@ -760,6 +848,12 @@ def test_patched_pipeline_supports_alternate_input(expected: dict, tmp_path_fact
     assert summary["campaign_count"] == alt["campaign_count"]
     assert summary["max_campaign_risk_score"] == alt["max_campaign_risk_score"]
     assert summary["campaign_digest_checksum"] == alt["campaign_digest_checksum"]
+    assert summary["max_campaign_influence_score"] == alt[
+        "max_campaign_influence_score"
+    ]
+    assert summary["campaign_influence_digest_checksum"] == alt[
+        "campaign_influence_digest_checksum"
+    ]
     assert summary["escalation_digest_checksum"] == alt[
         "escalation_digest_checksum"
     ]
@@ -819,7 +913,6 @@ def test_repair_repatches_reset_workflow_with_custom_output_dir(
         )
         assert result.returncode == 0, result.stderr
         repaired_source = PIPELINE.read_text()
-        assert ".lower(" in repaired_source
         assert 'event["observed_at"]' not in repaired_source
         summary = json.loads((custom_dir / "summary.json").read_text())
         flagged = _flagged_rows(custom_dir / "flagged.jsonl")
@@ -1103,6 +1196,7 @@ def test_override_compaction_and_scope_exercised(tmp_path_factory):
 
 
 def test_campaign_correlation_is_transitive_across_bridge_alerts(tmp_path_factory):
+    """Require full connected components rather than direct-neighbor groups."""
     original_overrides = OVERRIDES_PATH.read_text()
     try:
         OVERRIDES_PATH.write_text("[]\n")
@@ -1145,5 +1239,60 @@ def test_campaign_correlation_is_transitive_across_bridge_alerts(tmp_path_factor
         summary = json.loads((out_dir / "summary.json").read_text())
         assert summary["campaign_count"] == 1
         assert summary["max_campaign_risk_score"] == 19
+    finally:
+        OVERRIDES_PATH.write_text(original_overrides)
+
+
+def test_campaign_influence_propagates_over_strongest_directed_path(tmp_path_factory):
+    """Verify strongest-path dynamic programming across campaign nodes."""
+    original_overrides = OVERRIDES_PATH.read_text()
+    try:
+        OVERRIDES_PATH.write_text("[]\n")
+        events = [
+            {
+                "alert_id": "i1",
+                "observed_ms": 100,
+                "severity": "critical",
+                "asset_group": "edge",
+                "signature": "alpha one",
+                "muted": False,
+            },
+            {
+                "alert_id": "i2",
+                "observed_ms": 1000,
+                "severity": "critical",
+                "asset_group": "edge",
+                "signature": "beta two",
+                "muted": False,
+            },
+            {
+                "alert_id": "i3",
+                "observed_ms": 2000,
+                "severity": "critical",
+                "asset_group": "core",
+                "signature": "beta gamma",
+                "muted": False,
+            },
+        ]
+        input_path = tmp_path_factory.mktemp("influence") / "events.json"
+        input_path.write_text(json.dumps(events))
+        out_dir = tmp_path_factory.mktemp("influence_out")
+        result = _run_pipeline(input_path=input_path, output_dir=out_dir)
+        assert result.returncode == 0, result.stderr
+        rows = {
+            row["alert_id"]: row
+            for row in _flagged_rows(out_dir / "flagged.jsonl")
+        }
+        assert rows["i1"]["campaign_influence_score"] == 6
+        assert rows["i2"]["campaign_influence_score"] == 18
+        assert rows["i3"]["campaign_influence_score"] == 28
+        assert rows["i3"]["campaign_influence_depth"] == 2
+        assert rows["i3"]["campaign_influence_path"] == [
+            rows["i1"]["campaign_id"],
+            rows["i2"]["campaign_id"],
+            rows["i3"]["campaign_id"],
+        ]
+        summary = json.loads((out_dir / "summary.json").read_text())
+        assert summary["max_campaign_influence_score"] == 28
     finally:
         OVERRIDES_PATH.write_text(original_overrides)

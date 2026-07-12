@@ -257,6 +257,80 @@ def _annotate_campaigns(escalations: list[dict]) -> None:
             escalations[index]["campaign_digest"] = campaign_digest
 
 
+def _annotate_campaign_influence(escalations: list[dict]) -> None:
+    campaigns: dict[str, dict] = {}
+    for index, row in enumerate(escalations):
+        campaign = campaigns.setdefault(
+            row["campaign_id"],
+            {
+                "indexes": [],
+                "start_ms": row["observed_ms"],
+                "end_ms": row["observed_ms"],
+                "assets": set(),
+                "tokens": set(),
+                "risk_score": row["campaign_risk_score"],
+            },
+        )
+        campaign["indexes"].append(index)
+        campaign["start_ms"] = min(campaign["start_ms"], row["observed_ms"])
+        campaign["end_ms"] = max(campaign["end_ms"], row["observed_ms"])
+        campaign["assets"].add(row["asset_group"])
+        campaign["tokens"].update(str(row["signature"]).lower().split())
+
+    ordered = sorted(
+        campaigns.items(),
+        key=lambda item: (item[1]["start_ms"], item[1]["end_ms"], item[0]),
+    )
+    finalized: list[tuple[str, dict]] = []
+    for campaign_id, campaign in ordered:
+        best_score = campaign["risk_score"]
+        best_path = (campaign_id,)
+        for predecessor_id, predecessor in finalized:
+            gap_ms = campaign["start_ms"] - predecessor["end_ms"]
+            if gap_ms <= 0 or gap_ms > 3000:
+                continue
+            shared_assets = len(campaign["assets"] & predecessor["assets"])
+            shared_tokens = len(campaign["tokens"] & predecessor["tokens"])
+            if shared_assets == 0 and shared_tokens == 0:
+                continue
+            edge_weight = (
+                1
+                + (2 * shared_assets)
+                + shared_tokens
+                + max(0, 3 - (gap_ms // 1000))
+            )
+            candidate_score = (
+                predecessor["influence_score"] + edge_weight + campaign["risk_score"]
+            )
+            candidate_path = predecessor["influence_path"] + (campaign_id,)
+            if candidate_score > best_score or (
+                candidate_score == best_score and candidate_path < best_path
+            ):
+                best_score = candidate_score
+                best_path = candidate_path
+        campaign["influence_score"] = best_score
+        campaign["influence_path"] = best_path
+        campaign["influence_depth"] = len(best_path) - 1
+        campaign["influence_digest"] = hashlib.sha256(
+            (
+                f"{campaign_id}|{best_score}|{campaign['influence_depth']}|"
+                f"{','.join(best_path)}"
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+        finalized.append((campaign_id, campaign))
+
+    for campaign_id, campaign in finalized:
+        for index in campaign["indexes"]:
+            escalations[index]["campaign_influence_score"] = campaign["influence_score"]
+            escalations[index]["campaign_influence_depth"] = campaign["influence_depth"]
+            escalations[index]["campaign_influence_path"] = list(
+                campaign["influence_path"]
+            )
+            escalations[index]["campaign_influence_digest"] = campaign[
+                "influence_digest"
+            ]
+
+
 def export_report(events: list[dict], output_dir: Path, override_rows: list[dict]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     canonical = canonicalize_events(events)
@@ -301,6 +375,7 @@ def export_report(events: list[dict], output_dir: Path, override_rows: list[dict
             }
         )
     _annotate_campaigns(escalations)
+    _annotate_campaign_influence(escalations)
     for escalation in escalations:
         escalation["escalation_digest"] = hashlib.sha1(
             (
@@ -309,7 +384,11 @@ def export_report(events: list[dict], output_dir: Path, override_rows: list[dict
                 f"{escalation['signature']}|{escalation['override_pressure_score']}|"
                 f"{escalation['campaign_id']}|{escalation['campaign_size']}|"
                 f"{escalation['campaign_span_ms']}|{escalation['campaign_risk_score']}|"
-                f"{escalation['campaign_digest']}"
+                f"{escalation['campaign_digest']}|"
+                f"{escalation['campaign_influence_score']}|"
+                f"{escalation['campaign_influence_depth']}|"
+                f"{','.join(escalation['campaign_influence_path'])}|"
+                f"{escalation['campaign_influence_digest']}"
             ).encode("utf-8")
         ).hexdigest()[:12]
     escalations.sort(
@@ -317,6 +396,7 @@ def export_report(events: list[dict], output_dir: Path, override_rows: list[dict
             -row["observed_ms"],
             -_severity_rank(row["severity"]),
             -row["campaign_risk_score"],
+            -row["campaign_influence_score"],
             -row["override_pressure_score"],
             str(row["alert_id"]),
         )
@@ -349,6 +429,15 @@ def export_report(events: list[dict], output_dir: Path, override_rows: list[dict
         ),
         "campaign_digest_checksum": hashlib.sha256(
             "|".join(row["campaign_digest"] for row in escalations).encode("utf-8")
+        ).hexdigest(),
+        "max_campaign_influence_score": max(
+            (row["campaign_influence_score"] for row in escalations),
+            default=0,
+        ),
+        "campaign_influence_digest_checksum": hashlib.sha256(
+            "|".join(
+                row["campaign_influence_digest"] for row in escalations
+            ).encode("utf-8")
         ).hexdigest(),
         "escalation_digest_checksum": hashlib.sha256(
             "|".join(row["escalation_digest"] for row in escalations).encode("utf-8")
