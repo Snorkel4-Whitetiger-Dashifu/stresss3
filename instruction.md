@@ -1,11 +1,13 @@
-Restore the SOC escalation rollup at `/app/workflow/export_report.py`. Build `/app/log_audit.py` with `diagnose --dossier PATH --report PATH` and `repair --output-dir PATH`, using `/app/incident/export_dossier.md` and `/app/workflow/.export_report.original` to substantiate the six required findings.
+# Recover the SOC escalation export
 
-Report exactly `wrong_observed_field`, `severity_filter`, `recency_order`, `severity_normalization`, `dedupe_alert`, and `muted_filter`. Each item has `id`, `severity`, `description`, `resolution`, and nested `evidence` with `dossier_quote`, `pipeline_evidence`, and `repair_action`. Required terms match case-sensitively in all three fields—including composed repair actions. Dossier quotes are verbatim and at least 30 characters; the other evidence strings are at least 10.
+The escalation rollup deployed during an incident is producing an unreliable responder queue. Please investigate the failure, restore `/app/workflow/export_report.py`, and add `/app/log_audit.py` so an operator can diagnose the broken deployment and perform a repeatable repair.
 
-Every explicit `diagnose` call is stateless: it always writes `pipeline_status: "diagnosed"` with exactly `pipeline_status`, `issues_found`, and `input_stats`, regardless of existing repair outputs or workflow state. It must omit `verified_summary` and `output_paths`. Repair writes status `repaired`, embeds the generated summary, and provides semantic output-path keys `summary_json`, `flagged_jsonl`, and `service_matrix_json`.
+Use the incident dossier and the frozen workflow snapshot as your evidence. Do not modify the frozen snapshot. The repaired export must handle alternate alert inputs, remain deterministic across reruns, and preserve the existing command and file locations used by operations.
 
-The workflow must normalize alerts, deterministically deduplicate by `alert_id`, exclude muted and overridden candidates, merge touching override windows, calculate override pressure, and emit compact JSONL. Build transitive alert campaigns, then propagate strongest directed influence paths between campaigns; influence participates in row ordering and all final digests. `/app/docs/report_spec.json` is normative for the exact tie-break cascade, interval rules, graph equations, schemas, and the single authoritative escalation-digest payload.
+The implementation guide is `/app/docs/output_contract.md`. It describes the diagnostic and repair commands, required artifacts, evidence rules, and processing stages. `/app/docs/report_spec.json` is the authoritative reference for exact schemas, tie-breaks, interval behavior, campaign and influence calculations, ordering, and checksum payloads. Follow both documents rather than inferring behavior from the sample data.
 
-Every repair invocation captures the pre-repair SHA from frozen bytes, reinstalls the corrected workflow, runs it in the requested directory, and reruns it for idempotency. `repair_audit.json` has `patched_workflow`, `processing_steps`, `removed_tokens`, `pre_repair`, and `post_repair`; token maps use exact literals `event["observed_at"]` and `severity == "critical"`, while `post_repair` contains integer `escalated_count` and `rerun_escalated_count`. Never modify the frozen original.
+When you are done, run:
 
-Produce exactly `summary.json`, `service_matrix.json`, `flagged.jsonl`, `diagnosis.json`, and `repair_audit.json`. Finish with `python3 /app/log_audit.py repair --output-dir /app/output`; this final repair result—not a subsequent diagnose call—must remain at the default path.
+`python3 /app/log_audit.py repair --output-dir /app/output`
+
+Leave that repaired result in `/app/output` for the responder handoff.

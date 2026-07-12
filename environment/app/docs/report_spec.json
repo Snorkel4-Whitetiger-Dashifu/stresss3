@@ -1,6 +1,7 @@
 {
   "title": "SOC Escalation Rollup — Audit & Export Spec",
   "version": "5.0",
+  "human_implementation_guide": "/app/docs/output_contract.md",
   "quick_contract_index": {
     "required_issue_ids": ["wrong_observed_field", "severity_filter", "recency_order", "severity_normalization", "dedupe_alert", "muted_filter"],
     "diagnose_is_stateless": "every explicit diagnose invocation writes pipeline_status=diagnosed and omits verified_summary/output_paths, regardless of existing repaired files or active workflow contents",
