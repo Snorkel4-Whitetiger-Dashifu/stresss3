@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -244,6 +245,59 @@ def _probe_overlap_ms(observed_ms: int, spans: list[tuple[int, int]], lookback_m
     return total
 
 
+def _annotate_campaigns(rows: list[dict]) -> None:
+    parent = list(range(len(rows)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[max(left_root, right_root)] = min(left_root, right_root)
+
+    tokens = [set(str(row["signature"]).lower().split()) for row in rows]
+    for left in range(len(rows)):
+        for right in range(left + 1, len(rows)):
+            if abs(rows[left]["observed_ms"] - rows[right]["observed_ms"]) > 600:
+                continue
+            if (
+                rows[left]["asset_group"] == rows[right]["asset_group"]
+                or len(tokens[left] & tokens[right]) >= 2
+            ):
+                union(left, right)
+
+    components: dict[int, list[int]] = {}
+    for index in range(len(rows)):
+        components.setdefault(find(index), []).append(index)
+    for indexes in components.values():
+        alert_ids = sorted(str(rows[index]["alert_id"]) for index in indexes)
+        observed = [rows[index]["observed_ms"] for index in indexes]
+        assets = {rows[index]["asset_group"] for index in indexes}
+        span_ms = max(observed) - min(observed)
+        risk_score = (
+            sum(_severity_rank(rows[index]["severity"]) for index in indexes)
+            + (len(assets) * 2)
+            + (span_ms // 60)
+        )
+        campaign_id = hashlib.sha1(",".join(alert_ids).encode("utf-8")).hexdigest()[:10]
+        campaign_digest = hashlib.sha256(
+            (
+                f"{campaign_id}|{len(indexes)}|{span_ms}|{risk_score}|"
+                f"{','.join(alert_ids)}"
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+        for index in indexes:
+            rows[index]["campaign_id"] = campaign_id
+            rows[index]["campaign_size"] = len(indexes)
+            rows[index]["campaign_span_ms"] = span_ms
+            rows[index]["campaign_risk_score"] = risk_score
+            rows[index]["campaign_digest"] = campaign_digest
+
+
 def _compute_summary(events: list[dict], override_rows: list[dict] | None = None) -> dict:
     canonical = _canonicalize_events(events)
     severity_counts = {severity: 0 for severity in SEVERITY_ORDER}
@@ -284,6 +338,14 @@ def _compute_summary(events: list[dict], override_rows: list[dict] | None = None
             (row["override_pressure_score"] for row in escalations),
             default=0,
         ),
+        "campaign_count": len({row["campaign_id"] for row in escalations}),
+        "max_campaign_risk_score": max(
+            (row["campaign_risk_score"] for row in escalations),
+            default=0,
+        ),
+        "campaign_digest_checksum": hashlib.sha256(
+            "|".join(row["campaign_digest"] for row in escalations).encode("utf-8")
+        ).hexdigest(),
         "escalation_digest_checksum": hashlib.sha256(
             "|".join(row["escalation_digest"] for row in escalations).encode("utf-8")
         ).hexdigest(),
@@ -311,12 +373,6 @@ def _compute_flagged(events: list[dict], override_rows: list[dict] | None = None
             observed_ms, compacted_overrides.get((asset_group, severity), [])
         )
         override_pressure_score = (all_overlap_ms // 30) + (severity_overlap_ms // 20)
-        escalation_digest = hashlib.sha1(
-            (
-                f"{event['alert_id']}|{observed_ms}|{severity}|{asset_group}|"
-                f"{_normalize_signature(event['signature'])}|{override_pressure_score}"
-            ).encode("utf-8")
-        ).hexdigest()[:12]
         rows.append(
             {
                 "alert_id": event["alert_id"],
@@ -325,13 +381,23 @@ def _compute_flagged(events: list[dict], override_rows: list[dict] | None = None
                 "asset_group": asset_group,
                 "signature": _normalize_signature(event["signature"]),
                 "override_pressure_score": override_pressure_score,
-                "escalation_digest": escalation_digest,
             }
         )
+    _annotate_campaigns(rows)
+    for row in rows:
+        row["escalation_digest"] = hashlib.sha1(
+            (
+                f"{row['alert_id']}|{row['observed_ms']}|{row['severity']}|"
+                f"{row['asset_group']}|{row['signature']}|{row['override_pressure_score']}|"
+                f"{row['campaign_id']}|{row['campaign_size']}|{row['campaign_span_ms']}|"
+                f"{row['campaign_risk_score']}|{row['campaign_digest']}"
+            ).encode("utf-8")
+        ).hexdigest()[:12]
     rows.sort(
         key=lambda row: (
             -row["observed_ms"],
             -_severity_rank(row["severity"]),
+            -row["campaign_risk_score"],
             -row["override_pressure_score"],
             str(row["alert_id"]),
         )
@@ -507,10 +573,14 @@ def test_verified_summary_matches_fixture(diagnosis: dict, expected: dict):
         "override_excluded_count",
         "override_compaction_checksum",
         "max_override_pressure_score",
+        "campaign_count",
+        "max_campaign_risk_score",
+        "campaign_digest_checksum",
         "escalation_digest_checksum",
     ):
         assert verified[key] == expected[key]
     assert list(verified["severity_counts"].keys()) == list(SEVERITY_ORDER)
+    assert len(verified["campaign_digest_checksum"]) == 64
     assert len(verified["escalation_digest_checksum"]) == 64
 
 
@@ -537,6 +607,11 @@ def test_flagged_severities(flagged_rows: list[dict]):
     for row in flagged_rows:
         assert row["severity"] in ESCALATION_SEVERITIES
         assert isinstance(row["override_pressure_score"], int)
+        assert len(row["campaign_id"]) == 10
+        assert isinstance(row["campaign_size"], int)
+        assert isinstance(row["campaign_span_ms"], int)
+        assert isinstance(row["campaign_risk_score"], int)
+        assert len(row["campaign_digest"]) == 12
         assert len(row["escalation_digest"]) == 12
 
 
@@ -559,6 +634,67 @@ def test_original_snapshot_preserved(expected: dict):
     assert ".lower(" not in original
 
 
+def test_pipeline_does_not_reference_test_or_solution_artifacts():
+    combined = PIPELINE.read_text() + "\n" + CLI.read_text()
+    for token in (
+        "/tests",
+        "expected_summary.json",
+        "alt_events.json",
+        "/solution",
+    ):
+        assert token not in combined
+
+
+def test_pipeline_runtime_does_not_read_tests_tree():
+    with tempfile.TemporaryDirectory() as tmp:
+        guard = Path(tmp) / "sitecustomize.py"
+        guard.write_text(
+            "\n".join(
+                [
+                    "import builtins",
+                    "from pathlib import Path",
+                    "_open = builtins.open",
+                    "_text = Path.read_text",
+                    "_bytes = Path.read_bytes",
+                    "def _blocked(value):",
+                    "    try: return '/tests' in str(Path(value).resolve())",
+                    "    except Exception: return False",
+                    "def guarded_open(file, *args, **kwargs):",
+                    "    if _blocked(file): raise PermissionError(file)",
+                    "    return _open(file, *args, **kwargs)",
+                    "def guarded_text(self, *args, **kwargs):",
+                    "    if _blocked(self): raise PermissionError(self)",
+                    "    return _text(self, *args, **kwargs)",
+                    "def guarded_bytes(self, *args, **kwargs):",
+                    "    if _blocked(self): raise PermissionError(self)",
+                    "    return _bytes(self, *args, **kwargs)",
+                    "builtins.open = guarded_open",
+                    "Path.read_text = guarded_text",
+                    "Path.read_bytes = guarded_bytes",
+                ]
+            )
+            + "\n"
+        )
+        out = Path(tmp) / "out"
+        env = dict(os.environ)
+        env["PYTHONPATH"] = tmp
+        result = subprocess.run(
+            [
+                "python3",
+                str(PIPELINE),
+                "--input",
+                str(INPUT_PATH),
+                "--output-dir",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+
+
 def test_broken_snapshot_produces_wrong_export(expected: dict):
     with tempfile.TemporaryDirectory() as tmp:
         broken = Path(tmp) / "export_report.py"
@@ -578,6 +714,8 @@ def test_pipeline_patched():
     code = _executable_text(PIPELINE.read_text())
     for token in FORBIDDEN_TOKENS:
         assert token not in code
+    for token in SPEC_DATA["workflow_repair"]["required_executable_tokens"]:
+        assert token in code
 
 
 def test_repair_audit(diagnosis: dict, expected: dict, summary: dict):
@@ -619,6 +757,12 @@ def test_patched_pipeline_supports_alternate_input(expected: dict, tmp_path_fact
     assert summary["muted_excluded_count"] == alt["muted_excluded_count"]
     assert summary["override_excluded_count"] == alt["override_excluded_count"]
     assert summary["override_compaction_checksum"] == alt["override_compaction_checksum"]
+    assert summary["campaign_count"] == alt["campaign_count"]
+    assert summary["max_campaign_risk_score"] == alt["max_campaign_risk_score"]
+    assert summary["campaign_digest_checksum"] == alt["campaign_digest_checksum"]
+    assert summary["escalation_digest_checksum"] == alt[
+        "escalation_digest_checksum"
+    ]
     assert [row["alert_id"] for row in flagged] == alt["flagged_ids_desc"]
 
 
@@ -954,5 +1098,52 @@ def test_override_compaction_and_scope_exercised(tmp_path_factory):
         flagged = _flagged_rows(out_dir / "flagged.jsonl")
         assert summary["override_excluded_count"] == 2
         assert [row["alert_id"] for row in flagged] == ["o4", "o2"]
+    finally:
+        OVERRIDES_PATH.write_text(original_overrides)
+
+
+def test_campaign_correlation_is_transitive_across_bridge_alerts(tmp_path_factory):
+    original_overrides = OVERRIDES_PATH.read_text()
+    try:
+        OVERRIDES_PATH.write_text("[]\n")
+        events = [
+            {
+                "alert_id": "c1",
+                "observed_ms": 100,
+                "severity": "critical",
+                "asset_group": "edge",
+                "signature": "alpha beta one",
+                "muted": False,
+            },
+            {
+                "alert_id": "c2",
+                "observed_ms": 250,
+                "severity": "high",
+                "asset_group": "core",
+                "signature": "alpha beta two",
+                "muted": False,
+            },
+            {
+                "alert_id": "c3",
+                "observed_ms": 400,
+                "severity": "high",
+                "asset_group": "core",
+                "signature": "gamma delta",
+                "muted": False,
+            },
+        ]
+        input_path = tmp_path_factory.mktemp("campaign") / "events.json"
+        input_path.write_text(json.dumps(events))
+        out_dir = tmp_path_factory.mktemp("campaign_out")
+        result = _run_pipeline(input_path=input_path, output_dir=out_dir)
+        assert result.returncode == 0, result.stderr
+        rows = _flagged_rows(out_dir / "flagged.jsonl")
+        assert {row["campaign_id"] for row in rows} == {rows[0]["campaign_id"]}
+        assert {row["campaign_size"] for row in rows} == {3}
+        assert {row["campaign_span_ms"] for row in rows} == {300}
+        assert {row["campaign_risk_score"] for row in rows} == {19}
+        summary = json.loads((out_dir / "summary.json").read_text())
+        assert summary["campaign_count"] == 1
+        assert summary["max_campaign_risk_score"] == 19
     finally:
         OVERRIDES_PATH.write_text(original_overrides)

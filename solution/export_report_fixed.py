@@ -199,6 +199,64 @@ def _probe_overlap_ms(
     return total
 
 
+def _annotate_campaigns(escalations: list[dict]) -> None:
+    parent = list(range(len(escalations)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[max(left_root, right_root)] = min(left_root, right_root)
+
+    signature_tokens = [
+        set(str(row["signature"]).lower().split()) for row in escalations
+    ]
+    for left in range(len(escalations)):
+        for right in range(left + 1, len(escalations)):
+            if abs(escalations[left]["observed_ms"] - escalations[right]["observed_ms"]) > 600:
+                continue
+            same_asset = (
+                escalations[left]["asset_group"] == escalations[right]["asset_group"]
+            )
+            shared_signature_tokens = len(
+                signature_tokens[left] & signature_tokens[right]
+            )
+            if same_asset or shared_signature_tokens >= 2:
+                union(left, right)
+
+    components: dict[int, list[int]] = {}
+    for index in range(len(escalations)):
+        components.setdefault(find(index), []).append(index)
+    for indexes in components.values():
+        alert_ids = sorted(str(escalations[index]["alert_id"]) for index in indexes)
+        observed = [escalations[index]["observed_ms"] for index in indexes]
+        assets = {escalations[index]["asset_group"] for index in indexes}
+        span_ms = max(observed) - min(observed)
+        risk_score = (
+            sum(_severity_rank(escalations[index]["severity"]) for index in indexes)
+            + (len(assets) * 2)
+            + (span_ms // 60)
+        )
+        campaign_id = hashlib.sha1(",".join(alert_ids).encode("utf-8")).hexdigest()[:10]
+        campaign_digest = hashlib.sha256(
+            (
+                f"{campaign_id}|{len(indexes)}|{span_ms}|{risk_score}|"
+                f"{','.join(alert_ids)}"
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+        for index in indexes:
+            escalations[index]["campaign_id"] = campaign_id
+            escalations[index]["campaign_size"] = len(indexes)
+            escalations[index]["campaign_span_ms"] = span_ms
+            escalations[index]["campaign_risk_score"] = risk_score
+            escalations[index]["campaign_digest"] = campaign_digest
+
+
 def export_report(events: list[dict], output_dir: Path, override_rows: list[dict]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     canonical = canonicalize_events(events)
@@ -232,12 +290,6 @@ def export_report(events: list[dict], output_dir: Path, override_rows: list[dict
             compacted_overrides.get((asset_group, severity), []),
         )
         override_pressure_score = (all_overlap_ms // 30) + (severity_overlap_ms // 20)
-        escalation_digest = hashlib.sha1(
-            (
-                f"{event['alert_id']}|{observed_ms}|{severity}|{asset_group}|"
-                f"{_normalize_signature(event['signature'])}|{override_pressure_score}"
-            ).encode("utf-8")
-        ).hexdigest()[:12]
         escalations.append(
             {
                 "alert_id": event["alert_id"],
@@ -246,13 +298,25 @@ def export_report(events: list[dict], output_dir: Path, override_rows: list[dict
                 "asset_group": asset_group,
                 "signature": _normalize_signature(event["signature"]),
                 "override_pressure_score": override_pressure_score,
-                "escalation_digest": escalation_digest,
             }
         )
+    _annotate_campaigns(escalations)
+    for escalation in escalations:
+        escalation["escalation_digest"] = hashlib.sha1(
+            (
+                f"{escalation['alert_id']}|{escalation['observed_ms']}|"
+                f"{escalation['severity']}|{escalation['asset_group']}|"
+                f"{escalation['signature']}|{escalation['override_pressure_score']}|"
+                f"{escalation['campaign_id']}|{escalation['campaign_size']}|"
+                f"{escalation['campaign_span_ms']}|{escalation['campaign_risk_score']}|"
+                f"{escalation['campaign_digest']}"
+            ).encode("utf-8")
+        ).hexdigest()[:12]
     escalations.sort(
         key=lambda row: (
             -row["observed_ms"],
             -_severity_rank(row["severity"]),
+            -row["campaign_risk_score"],
             -row["override_pressure_score"],
             str(row["alert_id"]),
         )
@@ -278,6 +342,14 @@ def export_report(events: list[dict], output_dir: Path, override_rows: list[dict
             (row["override_pressure_score"] for row in escalations),
             default=0,
         ),
+        "campaign_count": len({row["campaign_id"] for row in escalations}),
+        "max_campaign_risk_score": max(
+            (row["campaign_risk_score"] for row in escalations),
+            default=0,
+        ),
+        "campaign_digest_checksum": hashlib.sha256(
+            "|".join(row["campaign_digest"] for row in escalations).encode("utf-8")
+        ).hexdigest(),
         "escalation_digest_checksum": hashlib.sha256(
             "|".join(row["escalation_digest"] for row in escalations).encode("utf-8")
         ).hexdigest(),

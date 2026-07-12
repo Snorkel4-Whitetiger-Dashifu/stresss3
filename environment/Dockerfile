@@ -8,6 +8,7 @@ RUN apt-get update \
         asciinema \
     && rm -rf /var/lib/apt/lists/*
 
+# Pinned verifier dependencies, including pytest and pytest-json-ctrf.
 COPY requirements.lock /tmp/requirements.lock
 RUN python3 -m pip install --no-cache-dir --no-deps \
         -r /tmp/requirements.lock

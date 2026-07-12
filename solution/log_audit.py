@@ -72,14 +72,11 @@ def input_stats(events: list[dict]) -> dict:
     }
 
 
-def pipeline_source_sha256(source: str) -> str:
-    return hashlib.sha256(source.encode("utf-8")).hexdigest()
-
-
 def pre_repair_audit() -> dict:
-    source = ORIGINAL_PIPELINE.read_text()
+    source_bytes = ORIGINAL_PIPELINE.read_bytes()
+    source = source_bytes.decode("utf-8")
     return {
-        "pipeline_source_sha256": pipeline_source_sha256(source),
+        "pipeline_source_sha256": hashlib.sha256(source_bytes).hexdigest(),
         "pipeline_tokens_present": {token: token in source for token in FORBIDDEN_TOKENS},
     }
 

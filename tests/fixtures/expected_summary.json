@@ -19,7 +19,10 @@
   "override_excluded_count": 3,
   "override_compaction_checksum": "10611bb599082ee618c5faa76601fbe1edf292243599ffff21c0f14fa1c69b25",
   "max_override_pressure_score": 5,
-  "escalation_digest_checksum": "6014248a475dea11f4c6144139e384359af701a6a34ca493e08037ffbdf32cf1",
+  "campaign_count": 6,
+  "max_campaign_risk_score": 16,
+  "campaign_digest_checksum": "d92b9d99cf892f48641b595daed43a0d79a5a90b92ac45b466761908055c8875",
+  "escalation_digest_checksum": "417db0dc22d9aea75dc973061895ac2d35a94a7edf41e93f37f53aee8951a4f2",
   "alert_count": 22,
   "unique_ids": 17,
   "expected_flagged_ids_desc": [
@@ -79,7 +82,10 @@
     "override_excluded_count": 1,
     "override_compaction_checksum": "10611bb599082ee618c5faa76601fbe1edf292243599ffff21c0f14fa1c69b25",
     "max_override_pressure_score": 0,
-    "escalation_digest_checksum": "47284abb03e6ffe9129876d6e591481ffb47140f189a44ec880ade2eaeab5860",
+    "campaign_count": 1,
+    "max_campaign_risk_score": 6,
+    "campaign_digest_checksum": "ff6ff5e1facebf9b55502b9e220c7d4375aa3ac9f0964ded0c7992a671387608",
+    "escalation_digest_checksum": "c663591b8116db51fe115e70a68204c9ed4254338b7c94285468da06d0f921ac",
     "severity_counts": {
       "critical": 2,
       "high": 1,

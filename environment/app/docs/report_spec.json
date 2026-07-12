@@ -1,6 +1,12 @@
 {
   "title": "SOC Escalation Rollup — Audit & Export Spec",
-  "version": "3.6",
+  "version": "4.0",
+  "quick_contract_index": {
+    "repair_post_repair_exact_fields": ["escalated_count", "rerun_escalated_count"],
+    "forbidden_executable_tokens": ["event[\"observed_at\"]", "severity == \"critical\""],
+    "repair_output_path_keys": ["summary_json", "flagged_jsonl", "service_matrix_json"],
+    "final_default_state": "/app/output/diagnosis.json must be the repaired-mode report"
+  },
   "cli": {
     "path": "/app/log_audit.py",
     "subcommands": {
@@ -50,6 +56,11 @@
         "pipeline_evidence_source": "/app/workflow/.export_report.original",
         "pipeline_evidence_format": "literal substring excerpt from frozen original workflow source",
         "dossier_quote_format": "verbatim excerpt from /app/incident/export_dossier.md (whitespace-normalized match)",
+        "minimum_lengths": {
+          "dossier_quote": 30,
+          "pipeline_evidence": 10,
+          "repair_action": 10
+        },
         "term_matching": "case-sensitive substring match for all required_terms_by_issue entries",
         "required_terms_by_issue": {
           "wrong_observed_field": {
@@ -104,6 +115,9 @@
         "override_excluded_count",
         "override_compaction_checksum",
         "max_override_pressure_score",
+        "campaign_count",
+        "max_campaign_risk_score",
+        "campaign_digest_checksum",
         "escalation_digest_checksum"
       ]
     },
@@ -141,6 +155,8 @@
       "load_escalation_overrides",
       "apply_override_suppression",
       "filter_muted",
+      "correlate_campaigns",
+      "score_campaigns",
       "build_escalations"
     ],
     "patched_workflow": "/app/workflow/export_report.py",
@@ -168,7 +184,7 @@
       "required_fields": ["pipeline_source_sha256", "pipeline_tokens_present"],
       "capture_order": "before any write to export_report.py",
       "capture_source": "/app/workflow/.export_report.original",
-      "capture_rule": "pipeline_source_sha256 and pipeline_tokens_present are computed from frozen original snapshot bytes before applying any patch",
+      "capture_rule": "pipeline_source_sha256 is hashlib.sha256(Path('/app/workflow/.export_report.original').read_bytes()).hexdigest(); pipeline_tokens_present is computed from that frozen original before applying any patch",
       "pipeline_tokens_present_schema": {
         "description": "Map each forbidden_executable_tokens literal string to a boolean that indicates it was present before repair.",
         "required_key_source": "keys must be the exact literal strings from forbidden_executable_tokens (no semantic aliases)",
@@ -190,6 +206,13 @@
       "output_dir": "/app/output",
       "escalation_overrides": "/app/data/escalation_overrides.json"
     },
+    "required_executable_tokens": [
+      ".lower(",
+      "observed_ms",
+      "campaign_id",
+      "campaign_risk_score",
+      "campaign_digest"
+    ],
     "acceptance_contract": "The repaired workflow must satisfy canonicalization and outputs without relying on test or solution artifacts.",
     "repair_state_contract": {
       "self_contained": "every log_audit.py repair invocation must write a correct repaired implementation to /app/workflow/export_report.py before running it",
@@ -221,6 +244,9 @@
         "test_vector_sha256": "03185b505ae526bc703c4e14bd088572497a9f801a18fba4fc50d2fdab082522"
       },
       "max_override_pressure_score": "maximum override_pressure_score across final escalation rows (0 when none)",
+      "campaign_count": "number of distinct campaign_id values across final escalation rows",
+      "max_campaign_risk_score": "maximum campaign_risk_score across final escalation rows (0 when none)",
+      "campaign_digest_checksum": "sha256('|'.join(campaign_digest values in final escalation order)) lowercase 64 hex chars",
       "escalation_digest_checksum": "sha256('|'.join(escalation_digest values in final escalation order)) lowercase 64 hex chars"
     },
     "service_matrix_json": {
@@ -237,12 +263,17 @@
       "severity_key_order": ["critical", "high", "medium", "low"]
     },
     "flagged_jsonl": {
-      "required_fields": ["alert_id", "observed_ms", "severity", "asset_group", "signature", "override_pressure_score", "escalation_digest"],
-      "sort": "observed_ms descending",
+      "required_fields": ["alert_id", "observed_ms", "severity", "asset_group", "signature", "override_pressure_score", "campaign_id", "campaign_size", "campaign_span_ms", "campaign_risk_score", "campaign_digest", "escalation_digest"],
+      "sort": "observed_ms desc, severity rank desc, campaign_risk_score desc, override_pressure_score desc, alert_id asc",
       "severities_included": ["high", "critical"],
       "exclude_muted": true,
       "json_format": "compact (no space after colon)"
     }
+  },
+  "guardrails": {
+    "frozen_original": "/app/workflow/.export_report.original must remain byte-identical",
+    "test_artifacts": "repaired source must not reference /tests, expected_summary.json, alt_events.json, or /solution, and runtime reads from /tests are forbidden",
+    "generalization": "derive outputs from --input and fixed operational data sources rather than fixture values"
   },
   "context": {
     "dossier_path": "/app/incident/export_dossier.md",
@@ -251,5 +282,18 @@
   "escalation_overrides": {
     "source_path": "/app/data/escalation_overrides.json",
     "row_fields": ["asset_group", "severity_scope", "start_ms", "end_ms"]
+  },
+  "campaign_correlation": {
+    "input_rows": "final unmuted, unsuppressed high/critical escalation candidates before final sorting",
+    "signature_tokens": "lowercase normalized signature split on whitespace into a set",
+    "edge_rule": "create an undirected edge between two candidates when abs(observed_ms difference) <= 600 and either asset_group matches or their signature token sets share at least two tokens",
+    "transitivity": "campaigns are full connected components of the undirected graph, not only direct neighbors",
+    "campaign_alert_ids": "component alert ids converted to strings and sorted lexicographically",
+    "campaign_id": "first 10 lowercase SHA1 hex chars of comma_joined_campaign_alert_ids",
+    "campaign_size": "number of rows in the connected component",
+    "campaign_span_ms": "maximum observed_ms minus minimum observed_ms in the component",
+    "campaign_risk_score": "sum severity ranks (critical=4, high=3) + 2*distinct_asset_group_count + campaign_span_ms//60",
+    "campaign_digest": "first 12 lowercase SHA256 hex chars of campaign_id|campaign_size|campaign_span_ms|campaign_risk_score|comma_joined_campaign_alert_ids",
+    "escalation_digest": "first 12 lowercase SHA1 hex chars of alert_id|observed_ms|severity|asset_group|signature|override_pressure_score|campaign_id|campaign_size|campaign_span_ms|campaign_risk_score|campaign_digest"
   }
 }
