@@ -1,19 +1,50 @@
 {
-  "title": "SOC Escalation Rollup — Audit & Export Spec",
+  "title": "SOC Escalation Rollup \u2014 Audit & Export Spec",
   "version": "5.0",
   "human_implementation_guide": "/app/docs/output_contract.md",
   "quick_contract_index": {
-    "required_issue_ids": ["wrong_observed_field", "severity_filter", "recency_order", "severity_normalization", "dedupe_alert", "muted_filter"],
+    "required_issue_ids": [
+      "wrong_observed_field",
+      "severity_filter",
+      "recency_order",
+      "severity_normalization",
+      "dedupe_alert",
+      "muted_filter"
+    ],
     "diagnose_is_stateless": "every explicit diagnose invocation writes pipeline_status=diagnosed and omits verified_summary/output_paths, regardless of existing repaired files or active workflow contents",
     "issue_item_shape": {
-      "top_level": ["id", "severity", "description", "resolution", "evidence"],
-      "nested_evidence": ["dossier_quote", "pipeline_evidence", "repair_action"],
-      "minimum_lengths": [30, 10, 10],
+      "top_level": [
+        "id",
+        "severity",
+        "description",
+        "resolution",
+        "evidence"
+      ],
+      "nested_evidence": [
+        "dossier_quote",
+        "pipeline_evidence",
+        "repair_action"
+      ],
+      "minimum_lengths": [
+        30,
+        10,
+        10
+      ],
       "required_term_case": "case-sensitive for all three evidence strings, including agent-composed repair_action"
     },
-    "repair_post_repair_exact_fields": ["escalated_count", "rerun_escalated_count"],
-    "forbidden_executable_tokens": ["event[\"observed_at\"]", "severity == \"critical\""],
-    "repair_output_path_keys": ["summary_json", "flagged_jsonl", "service_matrix_json"],
+    "repair_post_repair_exact_fields": [
+      "escalated_count",
+      "rerun_escalated_count"
+    ],
+    "forbidden_executable_tokens": [
+      "event[\"observed_at\"]",
+      "severity == \"critical\""
+    ],
+    "repair_output_path_keys": [
+      "summary_json",
+      "flagged_jsonl",
+      "service_matrix_json"
+    ],
     "final_default_state": "/app/output/diagnosis.json must be the repaired-mode report"
   },
   "cli": {
@@ -27,7 +58,10 @@
         },
         "must_include_all_allowed_ids": true,
         "state_contract": "diagnose is stateless: always set pipeline_status to diagnosed and omit verified_summary/output_paths even when repair artifacts already exist or the active workflow is repaired",
-        "must_not_include_repaired_keys": ["verified_summary", "output_paths"],
+        "must_not_include_repaired_keys": [
+          "verified_summary",
+          "output_paths"
+        ],
         "input_events_path": "/app/data/events.json"
       },
       "repair": {
@@ -47,12 +81,28 @@
     }
   },
   "diagnosis_report": {
-    "required_keys_diagnosed": ["pipeline_status", "issues_found", "input_stats"],
-    "required_keys_repaired": ["pipeline_status", "issues_found", "input_stats", "verified_summary", "output_paths"],
+    "required_keys_diagnosed": [
+      "pipeline_status",
+      "issues_found",
+      "input_stats"
+    ],
+    "required_keys_repaired": [
+      "pipeline_status",
+      "issues_found",
+      "input_stats",
+      "verified_summary",
+      "output_paths"
+    ],
     "pipeline_status_diagnosed": "diagnosed",
     "pipeline_status_repaired": "repaired",
     "issues_found_item": {
-      "required_fields": ["id", "severity", "description", "resolution", "evidence"],
+      "required_fields": [
+        "id",
+        "severity",
+        "description",
+        "resolution",
+        "evidence"
+      ],
       "allowed_ids": [
         "wrong_observed_field",
         "severity_filter",
@@ -62,7 +112,11 @@
         "muted_filter"
       ],
       "evidence": {
-        "required_fields": ["dossier_quote", "pipeline_evidence", "repair_action"],
+        "required_fields": [
+          "dossier_quote",
+          "pipeline_evidence",
+          "repair_action"
+        ],
         "pipeline_evidence_source": "/app/workflow/.export_report.original",
         "pipeline_evidence_format": "literal substring excerpt from frozen original workflow source",
         "dossier_quote_format": "verbatim excerpt from /app/incident/export_dossier.md (whitespace-normalized match)",
@@ -74,40 +128,87 @@
         "term_matching": "case-sensitive substring match for every required_terms_by_issue entry in dossier_quote, pipeline_evidence, and repair_action; repair_action is agent-composed but its required terms still match case-sensitively",
         "required_terms_by_issue": {
           "wrong_observed_field": {
-            "dossier_quote": ["timestamp", "mismatch"],
-            "pipeline_evidence": ["event[\"observed_at\"]"],
-            "repair_action": ["timestamp source"]
+            "dossier_quote": [
+              "timestamp",
+              "mismatch"
+            ],
+            "pipeline_evidence": [
+              "event[\"observed_at\"]"
+            ],
+            "repair_action": [
+              "timestamp source"
+            ]
           },
           "severity_filter": {
-            "dossier_quote": ["queue", "missing"],
-            "pipeline_evidence": ["severity == \"critical\""],
-            "repair_action": ["severity coverage"]
+            "dossier_quote": [
+              "queue",
+              "missing"
+            ],
+            "pipeline_evidence": [
+              "severity == \"critical\""
+            ],
+            "repair_action": [
+              "severity coverage"
+            ]
           },
           "recency_order": {
-            "dossier_quote": ["ordering", "inconsistent"],
-            "pipeline_evidence": ["sort", "observed_ms"],
-            "repair_action": ["recency ordering"]
+            "dossier_quote": [
+              "ordering",
+              "inconsistent"
+            ],
+            "pipeline_evidence": [
+              "sort",
+              "observed_ms"
+            ],
+            "repair_action": [
+              "recency ordering"
+            ]
           },
           "severity_normalization": {
-            "dossier_quote": ["mixed-case", "diverged"],
-            "pipeline_evidence": ["severity"],
-            "repair_action": ["normalize severity"]
+            "dossier_quote": [
+              "mixed-case",
+              "diverged"
+            ],
+            "pipeline_evidence": [
+              "severity"
+            ],
+            "repair_action": [
+              "normalize severity"
+            ]
           },
           "dedupe_alert": {
-            "dossier_quote": ["duplicate", "competing"],
-            "pipeline_evidence": ["for event in events"],
-            "repair_action": ["deterministic collapse"]
+            "dossier_quote": [
+              "duplicate",
+              "competing"
+            ],
+            "pipeline_evidence": [
+              "for event in events"
+            ],
+            "repair_action": [
+              "deterministic collapse"
+            ]
           },
           "muted_filter": {
-            "dossier_quote": ["muted", "leaked"],
-            "pipeline_evidence": ["escalations.append"],
-            "repair_action": ["exclude muted"]
+            "dossier_quote": [
+              "muted",
+              "leaked"
+            ],
+            "pipeline_evidence": [
+              "escalations.append"
+            ],
+            "repair_action": [
+              "exclude muted"
+            ]
           }
         }
       }
     },
     "input_stats": {
-      "required_fields": ["alert_count", "unique_alert_ids", "asset_groups"],
+      "required_fields": [
+        "alert_count",
+        "unique_alert_ids",
+        "asset_groups"
+      ],
       "exact_key_names": "input_stats keys must be exactly alert_count, unique_alert_ids, asset_groups",
       "asset_groups_sort": "ascending alphabetical",
       "source_events_path": "/app/data/events.json"
@@ -140,25 +241,14 @@
       "key_naming_contract": "keys are semantic snake_case names, not filenames"
     }
   },
-  "canonicalization": {
-    "dedupe_by_alert_id": "collapse duplicate alert_id rows, keeping the row with highest observed_ms; tie-break by higher severity rank (critical > high > medium > low), then prefer muted=false over muted=true, then lexicographically larger normalized signature, then lexicographically larger normalized asset_group",
-    "observed_ms_normalization": "coerce observed_ms to int (trim string whitespace before int conversion; invalid values become 0)",
-    "severity_normalization": "strip surrounding whitespace then lowercase severity strings before counting and escalation",
-    "asset_group_normalization": "strip surrounding whitespace then lowercase asset_group names before grouping",
-    "signature_normalization": "normalize signature by collapsing internal whitespace to single spaces before tie-breaks and output",
-    "muted_normalization": "treat boolean-like strings ('true','1','yes') as true",
-    "override_scope_normalization": "override severity_scope uses str(...).strip().lower(); supported values are all, high, critical",
-    "override_window_canonicalization": "override windows come from /app/data/escalation_overrides.json; normalize asset_group and severity_scope, coerce start_ms/end_ms with observed_ms rules, drop end_ms<=start_ms, then sort and compact per (asset_group,severity_scope)",
-    "override_compaction_merge_rule": "merge when next.start_ms <= current.end_ms, so touching intervals merge. An equivalent implementation starts a new segment only when next.start_ms > current.end_ms; that '>' branch does not mean touching intervals remain separate.",
-    "override_match_rule": "an escalation candidate is suppressed when start_ms <= observed_ms < end_ms for same normalized asset_group and matching severity_scope in {all, candidate.severity}",
-    "total_alerts": "count canonical deduped alerts (muted rows remain in totals)",
-    "flagged_export": "include high and critical only, exclude muted=true, exclude candidates suppressed by override_match_rule, then annotate campaigns and directed influence before final sorting"
-    ,
-    "override_pressure_score": "for each included escalation row, compute all_overlap_ms using [observed_ms-120, observed_ms+1) against scope=all windows and severity_overlap_ms against scope=event severity windows; score=(all_overlap_ms//30)+(severity_overlap_ms//20)",
-    "digest_authority": "the single escalation_digest definition is in campaign_influence.escalation_digest"
-  },
   "repair_audit": {
-    "required_keys": ["patched_workflow", "processing_steps", "removed_tokens", "pre_repair", "post_repair"],
+    "required_keys": [
+      "patched_workflow",
+      "processing_steps",
+      "removed_tokens",
+      "pre_repair",
+      "post_repair"
+    ],
     "processing_steps": [
       "normalize_observed_ms",
       "normalize_severity",
@@ -193,7 +283,10 @@
       }
     },
     "pre_repair": {
-      "required_fields": ["pipeline_source_sha256", "pipeline_tokens_present"],
+      "required_fields": [
+        "pipeline_source_sha256",
+        "pipeline_tokens_present"
+      ],
       "capture_order": "before any write to export_report.py",
       "capture_source": "/app/workflow/.export_report.original",
       "capture_rule": "pipeline_source_sha256 is hashlib.sha256(Path('/app/workflow/.export_report.original').read_bytes()).hexdigest(); pipeline_tokens_present is computed from that frozen original before applying any patch",
@@ -207,7 +300,10 @@
       }
     },
     "post_repair": {
-      "required_fields": ["escalated_count", "rerun_escalated_count"]
+      "required_fields": [
+        "escalated_count",
+        "rerun_escalated_count"
+      ]
     }
   },
   "workflow_repair": {
@@ -235,7 +331,12 @@
   "outputs": {
     "summary_json": {
       "schema_version": "siem-rollup-v2",
-      "severity_counts_key_order": ["critical", "high", "medium", "low"],
+      "severity_counts_key_order": [
+        "critical",
+        "high",
+        "medium",
+        "low"
+      ],
       "override_excluded_count": "count of escalation candidates excluded by canonicalized override windows",
       "override_compaction_checksum": "SHA-256 of the exact payload defined by override_checksum_serialization",
       "override_checksum_serialization": {
@@ -268,12 +369,37 @@
         }
       },
       "asset_group_sort": "ascending alphabetical",
-      "severity_key_order": ["critical", "high", "medium", "low"]
+      "severity_key_order": [
+        "critical",
+        "high",
+        "medium",
+        "low"
+      ]
     },
     "flagged_jsonl": {
-      "required_fields": ["alert_id", "observed_ms", "severity", "asset_group", "signature", "override_pressure_score", "campaign_id", "campaign_size", "campaign_span_ms", "campaign_risk_score", "campaign_digest", "campaign_influence_score", "campaign_influence_depth", "campaign_influence_path", "campaign_influence_digest", "escalation_digest"],
+      "required_fields": [
+        "alert_id",
+        "observed_ms",
+        "severity",
+        "asset_group",
+        "signature",
+        "override_pressure_score",
+        "campaign_id",
+        "campaign_size",
+        "campaign_span_ms",
+        "campaign_risk_score",
+        "campaign_digest",
+        "campaign_influence_score",
+        "campaign_influence_depth",
+        "campaign_influence_path",
+        "campaign_influence_digest",
+        "escalation_digest"
+      ],
       "sort": "observed_ms desc, severity rank desc, campaign_risk_score desc, campaign_influence_score desc, override_pressure_score desc, alert_id asc",
-      "severities_included": ["high", "critical"],
+      "severities_included": [
+        "high",
+        "critical"
+      ],
       "exclude_muted": true,
       "json_format": "compact (no space after colon)"
     }
@@ -289,30 +415,21 @@
   },
   "escalation_overrides": {
     "source_path": "/app/data/escalation_overrides.json",
-    "row_fields": ["asset_group", "severity_scope", "start_ms", "end_ms"]
+    "row_fields": [
+      "asset_group",
+      "severity_scope",
+      "start_ms",
+      "end_ms"
+    ]
   },
-  "campaign_correlation": {
-    "input_rows": "final unmuted, unsuppressed high/critical escalation candidates before final sorting",
-    "signature_tokens": "lowercase normalized signature split on whitespace into a set",
-    "edge_rule": "create an undirected edge between two candidates when abs(observed_ms difference) <= 600 and either asset_group matches or their signature token sets share at least two tokens",
-    "transitivity": "campaigns are full connected components of the undirected graph, not only direct neighbors",
-    "campaign_alert_ids": "component alert ids converted to strings and sorted lexicographically",
+  "digest_payloads": {
+    "campaign_digest": "first 12 lowercase SHA256 hex chars of campaign_id|campaign_size|campaign_span_ms|campaign_risk_score|comma_joined_campaign_alert_ids",
     "campaign_id": "first 10 lowercase SHA1 hex chars of comma_joined_campaign_alert_ids",
-    "campaign_size": "number of rows in the connected component",
-    "campaign_span_ms": "maximum observed_ms minus minimum observed_ms in the component",
-    "campaign_risk_score": "sum severity ranks (critical=4, high=3) + 2*distinct_asset_group_count + campaign_span_ms//60",
-    "campaign_digest": "first 12 lowercase SHA256 hex chars of campaign_id|campaign_size|campaign_span_ms|campaign_risk_score|comma_joined_campaign_alert_ids"
-  },
-  "campaign_influence": {
-    "nodes": "one node per campaign; start_ms=min member observed_ms, end_ms=max member observed_ms, assets=set of member asset_groups, tokens=union of lowercase whitespace-split member signatures",
-    "node_order": "ascending (start_ms, end_ms, campaign_id)",
-    "edge_rule": "directed predecessor->current when gap_ms=current.start_ms-predecessor.end_ms is in [1,3000] and campaigns share at least one asset or signature token",
-    "edge_weight": "1 + 2*shared_asset_count + shared_signature_token_count + max(0, 3-gap_ms//1000)",
-    "strongest_path_score": "campaign_risk_score for a source; otherwise maximize predecessor.campaign_influence_score + edge_weight + current.campaign_risk_score across incoming edges, also allowing the current campaign alone",
-    "tie_break": "for equal strongest_path_score choose lexicographically smallest tuple of campaign_id values in the complete path",
-    "campaign_influence_path": "chosen campaign_id path including current campaign",
-    "campaign_influence_depth": "len(campaign_influence_path)-1",
     "campaign_influence_digest": "first 12 lowercase SHA256 hex chars of campaign_id|campaign_influence_score|campaign_influence_depth|comma_joined_campaign_influence_path",
     "escalation_digest": "the only authoritative definition: first 12 lowercase SHA1 hex chars of alert_id|observed_ms|severity|asset_group|signature|override_pressure_score|campaign_id|campaign_size|campaign_span_ms|campaign_risk_score|campaign_digest|campaign_influence_score|campaign_influence_depth|comma_joined_campaign_influence_path|campaign_influence_digest"
+  },
+  "semantics_source": {
+    "notes": "This document is the output contract only: CLI shapes, report schemas, exact key sets, checksum serialization and digest payload encodings. It does NOT define how values are derived.",
+    "authority": "Normalization, dedupe tie-breaks, override windows/matching/pressure, campaign correlation and the directed influence propagation were settled during the SOC review; the authoritative record is the #SOC-ticketed decision notes inside /app/incident/export_dossier.md. Where an early triage proposal conflicts with a later decision, the later decision wins."
   }
 }

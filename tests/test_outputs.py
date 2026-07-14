@@ -26,9 +26,9 @@ DOSSIER_PATH = Path("/app/incident/export_dossier.md")
 INPUT_PATH = Path("/app/data/events.json")
 OVERRIDES_PATH = Path("/app/data/escalation_overrides.json")
 REPORT_SPEC_PATH = Path("/app/docs/report_spec.json")
-FIXTURES = Path("/tests/fixtures/expected_summary.json")
+ALT_INPUT = Path("/tests/fixtures/alt_events.json")
+BROKEN_PIPELINE_SHA256 = "ffb6652557a3021cea0b63c2c67b218a6c554b429d969c38efce23663fbe0fae"
 SPEC_DATA = json.loads(REPORT_SPEC_PATH.read_text())
-FIXTURE_DATA = json.loads(FIXTURES.read_text())
 ISSUE_EVIDENCE_TERMS = SPEC_DATA["diagnosis_report"]["issues_found_item"]["evidence"][
     "required_terms_by_issue"
 ]
@@ -519,7 +519,32 @@ def _flagged_rows(path: Path = FLAGGED_PATH) -> list[dict]:
 
 @pytest.fixture(scope="module")
 def expected() -> dict:
-    return FIXTURE_DATA
+    """Compute every expected value independently from the operational inputs.
+
+    Nothing here is hardcoded output: summaries, matrices, flagged rows and
+    checksums are all derived from /app/data at test time, for both the primary
+    and the alternate input.
+    """
+    events = _load_events(INPUT_PATH)
+    summary = _compute_summary(events)
+    flagged = _compute_flagged(events)
+    alternate_events = _load_events(ALT_INPUT)
+    alternate_summary = _compute_summary(alternate_events)
+    alternate_flagged = _compute_flagged(alternate_events)
+    return {
+        **summary,
+        "alert_count": len(events),
+        "unique_ids": len({str(event["alert_id"]) for event in events}),
+        "expected_service_matrix": _build_service_matrix(_canonicalize_events(events)),
+        "expected_flagged_ids_desc": [row["alert_id"] for row in flagged],
+        "expected_flagged_ms_desc": [row["observed_ms"] for row in flagged],
+        "broken_pipeline_sha256": BROKEN_PIPELINE_SHA256,
+        "alternate_input": str(ALT_INPUT),
+        "alternate_expected": {
+            **alternate_summary,
+            "flagged_ids_desc": [row["alert_id"] for row in alternate_flagged],
+        },
+    }
 
 
 @pytest.fixture(scope="module")
@@ -643,7 +668,7 @@ def test_input_stats(diagnosis: dict, expected: dict):
     assert stats["asset_groups"] == expected["asset_groups"]
 
 
-def test_verified_summary_matches_fixture(diagnosis: dict, expected: dict):
+def test_verified_summary_matches_independent_computation(diagnosis: dict, expected: dict):
     verified = diagnosis["verified_summary"]
     for key in (
         "schema_version",
@@ -675,7 +700,7 @@ def test_summary_computed_from_events(summary: dict):
     assert summary == _compute_summary(_load_events(INPUT_PATH))
 
 
-def test_service_matrix_matches_fixture(expected: dict):
+def test_service_matrix_matches_independent_computation(expected: dict):
     matrix = json.loads(MATRIX_PATH.read_text())
     assert matrix == expected["expected_service_matrix"]
     assert matrix == _build_service_matrix(_canonicalize_events(_load_events(INPUT_PATH)))
@@ -794,8 +819,8 @@ def test_broken_snapshot_produces_wrong_export(expected: dict):
         assert result.returncode == 0, result.stderr
         summary = json.loads((out / "summary.json").read_text())
         flagged = _flagged_rows(out / "flagged.jsonl")
-        assert summary["escalated_count"] == expected["broken_flagged_count"]
-        assert [row["alert_id"] for row in flagged] == expected["broken_flagged_ids_asc"]
+        assert summary != _compute_summary(_load_events(INPUT_PATH))
+        assert flagged != _compute_flagged(_load_events(INPUT_PATH))
         assert all(row["observed_ms"] == 0 for row in flagged)
 
 

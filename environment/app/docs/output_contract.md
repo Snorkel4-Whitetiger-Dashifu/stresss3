@@ -32,7 +32,7 @@ A diagnosed report contains only `pipeline_status`, `issues_found`, and `input_s
 
 The workflow canonicalizes alerts and deterministically deduplicates them by `alert_id`. Muted or actively overridden candidates do not enter the responder queue. Override windows are normalized and compacted before overlap and pressure calculations.
 
-Related alerts form transitive campaigns. Campaigns then participate in a directed influence graph whose strongest path is propagated in deterministic order. Campaign influence affects final row ordering, escalation digests, and summary checksums. Use `report_spec.json` for the exact normalization rules, tie-break cascade, interval boundaries, edge rules, equations, and hash serialization.
+Related alerts form transitive campaigns. Campaigns then participate in a directed influence graph whose strongest path is propagated in deterministic order. Campaign influence affects final row ordering, escalation digests, and summary checksums. `report_spec.json` defines the schemas, checksum serialization, and digest payloads; the normalization rules, tie-break cascade, interval boundaries, edge rules, and equations themselves were settled during the SOC review and are recorded as #SOC-ticketed decision notes in the incident dossier — reconcile them there, and note the February triage proposals were partly reversed later.
 
 ## Repair audit and artifacts
 
