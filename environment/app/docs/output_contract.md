@@ -26,7 +26,7 @@ The diagnosis covers these six deployment defects:
 
 Each finding contains `id`, `severity`, `description`, `resolution`, and an `evidence` object containing `dossier_quote`, `pipeline_evidence`, and `repair_action`. Dossier quotations are verbatim and at least 30 characters. Pipeline evidence and repair actions are at least 10 characters. Required evidence terms are case-sensitive, including terms assembled into a repair action.
 
-A diagnosed report contains only `pipeline_status`, `issues_found`, and `input_stats`, with status `diagnosed`. It does not contain `verified_summary` or `output_paths`. A repaired report has status `repaired`, embeds the generated summary, and uses the semantic path keys `summary_json`, `flagged_jsonl`, and `service_matrix_json`.
+A diagnosed report contains only `pipeline_status`, `issues_found`, and `input_stats`, with status `diagnosed`. `input_stats` carries exactly the keys `alert_count`, `unique_alert_ids`, and `asset_groups` — no aliases. It does not contain `verified_summary` or `output_paths`. A repaired report has status `repaired`, embeds the generated summary, and uses the semantic path keys `summary_json`, `flagged_jsonl`, and `service_matrix_json`.
 
 ## Escalation processing
 
@@ -38,7 +38,7 @@ Related alerts form transitive campaigns. Campaigns then participate in a direct
 
 Every repair reads the pre-repair SHA-256 from the frozen bytes before replacing the active workflow. `repair_audit.json` contains `patched_workflow`, `processing_steps`, `removed_tokens`, `pre_repair`, and `post_repair`. Copy `processing_steps` from the JSON specification without paraphrasing it.
 
-The removed-token map uses the exact source literals `event["observed_at"]` and `severity == "critical"`. The post-repair section records integer `escalated_count` and `rerun_escalated_count`.
+`removed_tokens` maps each forbidden token string to a boolean. The removed-token map uses the exact source literals `event["observed_at"]` and `severity == "critical"`. The post-repair section records integer `escalated_count` and `rerun_escalated_count`.
 
 The requested output directory contains exactly:
 

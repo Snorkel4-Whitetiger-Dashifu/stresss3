@@ -45,7 +45,32 @@
       "flagged_jsonl",
       "service_matrix_json"
     ],
-    "final_default_state": "/app/output/diagnosis.json must be the repaired-mode report"
+    "final_default_state": "/app/output/diagnosis.json must be the repaired-mode report",
+    "read_in_full": "This file is ~17KB; truncated reads miss required schema sections. Read it completely before implementing.",
+    "input_stats_exact_keys": [
+      "alert_count",
+      "unique_alert_ids",
+      "asset_groups"
+    ],
+    "verified_summary_required_fields": [
+      "schema_version",
+      "raw_alert_count",
+      "unique_alert_ids",
+      "total_alerts",
+      "severity_counts",
+      "asset_groups",
+      "escalated_count",
+      "muted_excluded_count",
+      "override_excluded_count",
+      "override_compaction_checksum",
+      "max_override_pressure_score",
+      "campaign_count",
+      "max_campaign_risk_score",
+      "campaign_digest_checksum",
+      "max_campaign_influence_score",
+      "campaign_influence_digest_checksum",
+      "escalation_digest_checksum"
+    ]
   },
   "cli": {
     "path": "/app/log_audit.py",
